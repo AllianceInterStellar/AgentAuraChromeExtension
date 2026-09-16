@@ -94,7 +94,9 @@ jobs:
           npm install --no-save playwright@1.58.2
           npx playwright install --with-deps chromium
           sudo apt-get install -y --no-install-recommends xvfb
-          cat > /tmp/load-check.mjs <<'JS'
+          # The script has to live in the workspace: Node resolves bare imports from the
+          # importing file's directory upwards, and nothing above /tmp has node_modules.
+          cat > "$GITHUB_WORKSPACE/load-check.mjs" <<'JS'
           import { chromium } from 'playwright'
           import os from 'node:os'
           import path from 'node:path'
@@ -133,7 +135,7 @@ jobs:
 
           await ctx.close()
           JS
-          xvfb-run -a node /tmp/load-check.mjs "$RUNNER_TEMP/unpacked"
+          xvfb-run -a node "$GITHUB_WORKSPACE/load-check.mjs" "$RUNNER_TEMP/unpacked"
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
