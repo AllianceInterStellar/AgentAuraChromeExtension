@@ -50,10 +50,21 @@ incidental:
 
 ```bash
 git clone https://github.com/AllianceInterStellar/AgentAuraChromeExtension.git
+cd AgentAuraChromeExtension
+node scripts/dev-install.mjs
 ```
 
-Then in Chrome: `chrome://extensions` → enable **Developer mode** → **Load unpacked** → pick
-the cloned directory. There is no build step; the extension runs from source as it is.
+That launches Chrome with the extension loaded and prints its id and side-panel URL. It uses
+a profile of its own, so the browser you are working in is untouched and you do not have to
+quit it. Node 22+; nothing to install.
+
+> Chrome 137 disabled the `--load-extension` switch, and it is now ignored *silently* — which
+> looks exactly like the extension failing to load. The script uses what replaced it, the
+> `Extensions.loadUnpacked` DevTools command behind `--enable-unsafe-extension-debugging`.
+> Extensions loaded this way live for the browser session; run it again after a restart.
+
+By hand, if you prefer: `chrome://extensions` → **Developer mode** → **Load unpacked** → pick
+the directory. There is no build step; the extension runs from source as it is.
 
 You will need an AgentAura account and a deployed agent gateway for it to talk to.
 
