@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "AgentAura - OpenClaw Manager",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "description": "Deploy, manage, and automate OpenClaw from Chrome with AI chat, cloud controls, and browser actions.",
     "permissions": [
         "storage",

@@ -281,7 +281,8 @@ const I18n = (() => {
             'account.signedIn': '✓ Signed In',
             'account.googleLinked': '✓ Google Linked',
             'account.anonymousSession': 'Anonymous session',
-            'account.version': 'AgentAura Chrome Extension v3.0.0',
+            'account.version': 'AgentAura Chrome Extension v{version}',
+            'app.versionBadge': 'v{version}',
 
             // Toast messages
             'toast.instanceStarting': 'Instance starting...',
@@ -359,7 +360,7 @@ const I18n = (() => {
             'options.tasks': 'Scheduled Tasks',
             'options.save': 'Save Settings',
             'options.saved': 'Settings saved!',
-            'options.version': 'AgentAura v3.0.0',
+            'options.version': 'AgentAura v{version}',
             'options.loading': 'Loading...',
             'options.noShortcuts': 'No saved shortcuts',
             'options.noTasks': 'No scheduled tasks',
@@ -691,7 +692,8 @@ const I18n = (() => {
             'account.loading': '加载中...',
             'account.guest': '👤 游客账户',
             'account.signedIn': '✓ 已登录',
-            'account.version': 'AgentAura 浏览器扩展 v3.0.0',
+            'account.version': 'AgentAura 浏览器扩展 v{version}',
+            'app.versionBadge': 'v{version}',
 
             // Toast messages
             'toast.instanceStarting': '正在启动实例...',
@@ -768,7 +770,7 @@ const I18n = (() => {
             'options.tasks': '定时任务',
             'options.save': '保存设置',
             'options.saved': '设置已保存！',
-            'options.version': 'AgentAura v3.0.0',
+            'options.version': 'AgentAura v{version}',
             'options.loading': '加载中...',
             'options.noShortcuts': '暂无保存的快捷提示',
             'options.noTasks': '暂无定时任务',
@@ -1213,18 +1215,32 @@ const I18n = (() => {
         ]
     }
 
+    /**
+     * Values every translated string may interpolate. The version comes from the manifest
+     * so it exists in exactly one place: it used to be typed into seven, and a release that
+     * updated the manifest alone shipped a UI still naming the previous version.
+     */
+    function ambientParams() {
+        try {
+            return { version: chrome.runtime.getManifest().version }
+        } catch (_) {
+            return {}
+        }
+    }
+
     function applyToPage() {
+        const ambient = ambientParams()
         document.querySelectorAll('[data-i18n]').forEach((el) => {
             const key = el.getAttribute('data-i18n')
-            el.textContent = t(key)
+            el.textContent = t(key, ambient)
         })
         document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
             const key = el.getAttribute('data-i18n-placeholder')
-            el.placeholder = t(key)
+            el.placeholder = t(key, ambient)
         })
         document.querySelectorAll('[data-i18n-title]').forEach((el) => {
             const key = el.getAttribute('data-i18n-title')
-            el.title = t(key)
+            el.title = t(key, ambient)
         })
         document.querySelectorAll('[data-i18n-prompt]').forEach((el) => {
             const key = el.getAttribute('data-i18n-prompt')

@@ -1407,7 +1407,7 @@ const sidepanel = (() => {
         }
 
         const data = {
-            version: '3.0.0',
+            version: chrome.runtime.getManifest().version,
             exportedAt: new Date().toISOString(),
             claw: activeClaw ? { id: activeClaw.id, name: activeClaw.name } : null,
             messages: messages.map(m => ({
