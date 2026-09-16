@@ -87,15 +87,15 @@ class PermissionManager {
 
     _describeActionBrief(action) {
         switch (action.type) {
-            case 'navigate': return `跳转到 ${action.url || ''}`
-            case 'new_tab': return `新标签打开 ${action.url || ''}`
-            case 'click_ref': return `点击元素 [${action.ref}]`
-            case 'type_ref': return `输入 "${(action.text || '').substring(0, 30)}"`
-            case 'scroll': return `滚动 ${action.direction || 'down'}`
-            case 'cdp_key': return `按键 ${action.key || ''}`
-            case 'screenshot': return '截图'
-            case 'wait': return `等待 ${action.duration || 1000}ms`
-            case 'execute_js': return '执行 JavaScript'
+            case 'navigate': return `Go to ${action.url || ''}`
+            case 'new_tab': return `Open ${action.url || ''} in a new tab`
+            case 'click_ref': return `Click element [${action.ref}]`
+            case 'type_ref': return `Type "${(action.text || '').substring(0, 30)}"`
+            case 'scroll': return `Scroll ${action.direction || 'down'}`
+            case 'cdp_key': return `Press ${action.key || ''}`
+            case 'screenshot': return 'Take a screenshot'
+            case 'wait': return `Wait ${action.duration || 1000}ms`
+            case 'execute_js': return 'Run JavaScript'
             default: return action.type
         }
     }

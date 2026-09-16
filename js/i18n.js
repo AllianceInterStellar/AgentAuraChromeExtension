@@ -1154,15 +1154,18 @@ const I18n = (() => {
     }
 
     async function init() {
+        // English unless the user has chosen otherwise. This used to follow the browser's UI
+        // language, which meant the same build opened in a different language depending on
+        // whose machine it was — surprising for a product whose own copy, docs and store
+        // listing are in English. detectLanguage() is still exported for anyone who wants to
+        // offer "match my browser" explicitly.
         try {
             const result = await chrome.storage?.local?.get?.(['i18n_lang'])
-            if (result && result.i18n_lang) {
-                currentLang = normalizeLanguage(result.i18n_lang)
-            } else {
-                currentLang = detectLanguage()
-            }
+            currentLang = result && result.i18n_lang
+                ? normalizeLanguage(result.i18n_lang)
+                : 'en'
         } catch (_) {
-            currentLang = detectLanguage()
+            currentLang = 'en'
         }
         return currentLang
     }

@@ -70,7 +70,7 @@ chrome.action.onClicked.addListener(async (tab) => {
             type: 'basic',
             iconUrl: 'icons/icon128.png',
             title: 'AgentAura',
-            message: e.message || '打开智能体失败'
+            message: e.message || 'Could not open the agent panel'
         })
     }
 })
@@ -339,17 +339,17 @@ function isBlockedSite(url) {
 async function handleAgentAction(action, tabId, sender) {
     await ensureTabGroupStateLoaded()
     const tab = tabId ? await chrome.tabs.get(tabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
-    if (!tab) return { success: false, error: '没有活跃标签页' }
+    if (!tab) return { success: false, error: 'No active tab' }
 
     if (isBlockedSite(tab.url)) {
-        return { success: false, error: '此站点因安全原因被禁止操作' }
+        return { success: false, error: 'This site is off limits for security reasons' }
     }
 
     switch (action.type) {
         case 'click':
             return await execFunc(tab.id, (selector) => {
                 const el = document.querySelector(selector)
-                if (!el) return { success: false, error: '未找到元素' }
+                if (!el) return { success: false, error: 'Element not found' }
                 el.click()
                 return { success: true }
             }, [action.selector || ''])
@@ -357,7 +357,7 @@ async function handleAgentAction(action, tabId, sender) {
         case 'type':
             return await execFunc(tab.id, (selector, text) => {
                 const el = document.querySelector(selector)
-                if (!el) return { success: false, error: '未找到元素' }
+                if (!el) return { success: false, error: 'Element not found' }
                 el.focus()
                 el.value = ''
                 el.value = text
@@ -395,7 +395,7 @@ async function handleAgentAction(action, tabId, sender) {
         case 'form_input':
             return await execFunc(tab.id, (selector, value, checked) => {
                 const el = document.querySelector(selector)
-                if (!el) return { success: false, error: '未找到元素' }
+                if (!el) return { success: false, error: 'Element not found' }
                 el.focus()
                 if (el.tagName === 'SELECT') {
                     el.value = value
@@ -452,7 +452,7 @@ async function handleAgentAction(action, tabId, sender) {
                 const groupInfo = await listGroupTabs(tab.id)
                 const allowed = groupInfo.tabs.some(groupTab => groupTab.id === action.targetTabId)
                 if (!allowed) {
-                    return { success: false, error: '目标标签页不在当前智能体分组中' }
+                    return { success: false, error: 'That tab is not in the current agent tab group' }
                 }
             }
             await chrome.tabs.update(action.targetTabId, { active: true })
@@ -558,13 +558,13 @@ async function handleAgentAction(action, tabId, sender) {
             return { success: true, requests: networkRequests.get(tab.id) || [] }
 
         default:
-            return { success: false, error: `未知操作类型: ${action.type}` }
+            return { success: false, error: `Unknown action type: ${action.type}` }
     }
 }
 
 async function takeScreenshot(tabId) {
     const tab = tabId ? await chrome.tabs.get(tabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
-    if (!tab) throw new Error('没有标签页')
+    if (!tab) throw new Error('No tab')
     await chrome.tabs.update(tab.id, { active: true })
     await new Promise(r => setTimeout(r, 200))
     return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 })
@@ -666,7 +666,7 @@ async function ensureTabGroup(tabId, title = 'AgentAura') {
 
     const tab = await chrome.tabs.get(tabId)
     if (!tab) {
-        throw new Error('没有标签页')
+        throw new Error('No tab')
     }
 
     if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) {
@@ -694,7 +694,7 @@ async function createTabGroup(tabIds, title) {
 
     const validTabIds = tabIds.filter(Boolean)
     if (!validTabIds.length) {
-        throw new Error('没有可分组的标签页')
+        throw new Error('No tabs to group')
     }
 
     const groupId = await chrome.tabs.group({ tabIds: validTabIds })
@@ -852,7 +852,7 @@ async function execFunc(tabId, func, args) {
         args: safeArgs,
         world: 'MAIN'
     })
-    return results[0]?.result || { success: false, error: '无返回结果' }
+    return results[0]?.result || { success: false, error: 'No result returned' }
 }
 
 async function exportConversation(data) {
@@ -874,7 +874,7 @@ async function forwardToContentScript(message) {
     const tab = message.tabId
         ? await chrome.tabs.get(message.tabId)
         : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
-    if (!tab) return { success: false, error: '没有活跃标签页' }
+    if (!tab) return { success: false, error: 'No active tab' }
     return await chrome.tabs.sendMessage(tab.id, message)
 }
 
@@ -1053,7 +1053,7 @@ async function executeScheduledTask(task) {
             })
         }, 1000)
     } catch (e) {
-        console.error('[Background] 执行定时任务失败:', e)
+        console.error('[Background] scheduled task failed:', e)
     }
 }
 
@@ -1071,7 +1071,7 @@ async function openAgentForCurrentTab(preferredTabId = null) {
     }
 
     if (!tab || !tab.id) {
-        throw new Error('没有活跃标签页')
+        throw new Error('No active tab')
     }
 
     await openAgentForTab(tab.id)
@@ -1080,7 +1080,7 @@ async function openAgentForCurrentTab(preferredTabId = null) {
 async function openAgentForTab(tabId) {
     const tab = await chrome.tabs.get(tabId)
     if (!tab || !tab.id) {
-        throw new Error('没有标签页')
+        throw new Error('No tab')
     }
 
     try {

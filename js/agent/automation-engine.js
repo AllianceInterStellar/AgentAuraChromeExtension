@@ -30,16 +30,16 @@ class AutomationEngine {
         get_page_text: { label: 'Get Text', icon: '📄', description: 'Get page text content' },
         resize_window: { label: 'Resize', icon: '📐', description: 'Resize browser window' },
         zoom: { label: 'Zoom', icon: '🔎', description: 'Change zoom level' },
-        click_ref: { label: '点击元素', icon: '👆', description: '通过引用ID点击元素' },
-        type_ref: { label: '输入文本', icon: '⌨️', description: '通过引用ID输入文本' },
-        hover_ref: { label: '悬停元素', icon: '🖱️', description: '通过引用ID悬停元素' },
-        read_page_content: { label: '读取页面', icon: '📖', description: '读取页面可访问性内容' },
-        cdp_click: { label: 'CDP点击', icon: '🎯', description: '通过坐标点击' },
-        cdp_type: { label: 'CDP输入', icon: '📝', description: '通过CDP输入文本' },
-        cdp_key: { label: 'CDP按键', icon: '⌨️', description: '通过CDP发送按键' },
-        cdp_drag: { label: 'CDP拖拽', icon: '↔️', description: '通过CDP拖拽操作' },
-        read_console: { label: '读取控制台', icon: '🖥️', description: '读取浏览器控制台消息' },
-        read_network: { label: '读取网络', icon: '🌐', description: '读取网络请求记录' }
+        click_ref: { label: 'Click element', icon: '👆', description: 'Click an element by its reference id' },
+        type_ref: { label: 'Type text', icon: '⌨️', description: 'Type into an element by its reference id' },
+        hover_ref: { label: 'Hover element', icon: '🖱️', description: 'Hover an element by its reference id' },
+        read_page_content: { label: 'Read page', icon: '📖', description: "Read the page's accessibility content" },
+        cdp_click: { label: 'CDP click', icon: '🎯', description: 'Click at coordinates' },
+        cdp_type: { label: 'CDP type', icon: '📝', description: 'Type text through CDP' },
+        cdp_key: { label: 'CDP key', icon: '⌨️', description: 'Send a keypress through CDP' },
+        cdp_drag: { label: 'CDP drag', icon: '↔️', description: 'Drag through CDP' },
+        read_console: { label: 'Read console', icon: '🖥️', description: 'Read browser console messages' },
+        read_network: { label: 'Read network', icon: '🌐', description: 'Read recorded network requests' }
     }
 
     async executeAction(action) {
@@ -201,16 +201,16 @@ class AutomationEngine {
             case 'get_page_text': return 'Get page text'
             case 'resize_window': return `Resize to ${action.width}x${action.height}`
             case 'zoom': return `Set zoom to ${action.level}x`
-            case 'click_ref': return `点击元素 [ref=${action.ref_id}]`
-            case 'type_ref': return `在元素 [ref=${action.ref_id}] 输入 "${(action.text || '').substring(0, 30)}"`
-            case 'hover_ref': return `悬停元素 [ref=${action.ref_id}]`
-            case 'read_page_content': return '读取页面可访问性内容'
-            case 'cdp_click': return `CDP点击坐标 (${action.x}, ${action.y})`
-            case 'cdp_type': return `CDP输入文本 "${(action.text || '').substring(0, 30)}"`
-            case 'cdp_key': return `CDP按键 ${action.key}`
-            case 'cdp_drag': return `CDP拖拽 (${action.startX},${action.startY}) → (${action.endX},${action.endY})`
-            case 'read_console': return '读取控制台消息'
-            case 'read_network': return '读取网络请求'
+            case 'click_ref': return `Click element [ref=${action.ref_id}]`
+            case 'type_ref': return `Type "${(action.text || '').substring(0, 30)}" into [ref=${action.ref_id}]`
+            case 'hover_ref': return `Hover element [ref=${action.ref_id}]`
+            case 'read_page_content': return "Read the page's accessibility content"
+            case 'cdp_click': return `CDP click at (${action.x}, ${action.y})`
+            case 'cdp_type': return `CDP type "${(action.text || '').substring(0, 30)}"`
+            case 'cdp_key': return `CDP key ${action.key}`
+            case 'cdp_drag': return `CDP drag (${action.startX},${action.startY}) → (${action.endX},${action.endY})`
+            case 'read_console': return 'Read console messages'
+            case 'read_network': return 'Read network requests'
             default: return action.type
         }
     }

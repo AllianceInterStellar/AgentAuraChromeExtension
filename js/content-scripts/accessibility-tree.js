@@ -215,7 +215,7 @@
         } else if (message.type === 'CLICK_ELEMENT_BY_REF') {
             const el = getElementByRefId(message.refId)
             if (!el) {
-                sendResponse({ success: false, error: `元素 [${message.refId}] 未找到` })
+                sendResponse({ success: false, error: `Element [${message.refId}] not found` })
             } else {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' })
                 setTimeout(() => {
@@ -233,7 +233,7 @@
         } else if (message.type === 'TYPE_IN_ELEMENT_BY_REF') {
             const el = getElementByRefId(message.refId)
             if (!el) {
-                sendResponse({ success: false, error: `元素 [${message.refId}] 未找到` })
+                sendResponse({ success: false, error: `Element [${message.refId}] not found` })
             } else {
                 el.focus()
                 if (message.clear !== false) el.value = ''
@@ -246,7 +246,7 @@
         } else if (message.type === 'HOVER_ELEMENT_BY_REF') {
             const el = getElementByRefId(message.refId)
             if (!el) {
-                sendResponse({ success: false, error: `元素 [${message.refId}] 未找到` })
+                sendResponse({ success: false, error: `Element [${message.refId}] not found` })
             } else {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' })
                 el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
@@ -256,7 +256,7 @@
         } else if (message.type === 'GET_ELEMENT_RECT') {
             const rect = getElementRect(message.refId)
             if (!rect) {
-                sendResponse({ success: false, error: `元素 [${message.refId}] 未找到` })
+                sendResponse({ success: false, error: `Element [${message.refId}] not found` })
             } else {
                 sendResponse({ success: true, rect })
             }

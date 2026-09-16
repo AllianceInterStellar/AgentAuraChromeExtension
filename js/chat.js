@@ -341,9 +341,9 @@ class ChatService {
             if (normalizedAttachments.length > 0) {
                 requestPayload.attachments = normalizedAttachments
                 const totalBytes = normalizedAttachments.reduce((sum, a) => sum + (a.content ? a.content.length : 0), 0)
-                console.info(`[ChatService][附件诊断] 发送 ${normalizedAttachments.length} 个附件, 类型: ${normalizedAttachments.map(a => a.mimeType).join(', ')}, base64总长: ${totalBytes} 字符 (~${Math.round(totalBytes * 0.75 / 1024)}KB)`)
+                console.info(`[ChatService][attachments] sending ${normalizedAttachments.length} attachment(s), types: ${normalizedAttachments.map(a => a.mimeType).join(', ')}, base64 total: ${totalBytes} chars (~${Math.round(totalBytes * 0.75 / 1024)}KB)`)
             } else {
-                console.info('[ChatService][附件诊断] 本次发送无附件')
+                console.info('[ChatService][attachments] none on this message')
             }
 
             const response = await this._sendRequest('chat.send', requestPayload)
@@ -674,7 +674,7 @@ class ChatManager {
 
         const gatewayUrl = claw.subdomain ? `https://${claw.subdomain}.digitalenginecore.com` : null
         if (!gatewayUrl) {
-            this._updateLastAssistant(session, '网关地址不可用', false, true)
+            this._updateLastAssistant(session, 'Gateway address unavailable', false, true)
             return
         }
 
@@ -838,7 +838,7 @@ function renderChatBubble(msg) {
     }
 
     if (!msg.isStreaming && msg.content) {
-        html += `<div class="chat-msg-actions"><button class="chat-msg-action-btn" onclick="chatCopyMessage(this)" title="复制"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button></div>`
+        html += `<div class="chat-msg-actions"><button class="chat-msg-action-btn" onclick="chatCopyMessage(this)" title="Copy"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button></div>`
     }
 
     html += '</div>'
@@ -903,7 +903,7 @@ function renderMarkdown(text) {
 
     codeBlocks.forEach((block, idx) => {
         const langLabel = block.lang ? `<span class="chat-code-lang">${escapeHtml(block.lang)}</span>` : ''
-        const copyBtn = `<button class="chat-code-copy-btn" onclick="chatCopyCode(this)" title="复制"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button>`
+        const copyBtn = `<button class="chat-code-copy-btn" onclick="chatCopyCode(this)" title="Copy"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button>`
         const replacement = `<div class="chat-code-wrapper"><div class="chat-code-header">${langLabel}${copyBtn}</div><pre class="chat-code-block"><code>${escapeHtml(block.code)}</code></pre></div>`
         html = html.replace(`\x00CODEBLOCK_${idx}\x00`, replacement)
     })

@@ -995,10 +995,10 @@ const sidepanel = (() => {
     }
 
     async function runVisionTest() {
-        addSystemMessage('===== 视觉验证测试开始 =====')
+        addSystemMessage('===== Vision check starting =====')
 
         if (!activeClaw || !chatService) {
-            addSystemMessage('[失败] 请先选择一个运行中的实例。')
+            addSystemMessage('[failed] Pick a running instance first.')
             return
         }
 
@@ -1006,10 +1006,10 @@ const sidepanel = (() => {
         const colors = ['#e74c3c', '#2ecc71', '#3498db', '#f39c12', '#9b59b6']
         const pick = Math.floor(Math.random() * colors.length)
         const colorHex = colors[pick]
-        const colorNames = { '#e74c3c': '红色', '#2ecc71': '绿色', '#3498db': '蓝色', '#f39c12': '橙色', '#9b59b6': '紫色' }
+        const colorNames = { '#e74c3c': 'red', '#2ecc71': 'green', '#3498db': 'blue', '#f39c12': 'orange', '#9b59b6': 'purple' }
         const expectedColor = colorNames[colorHex]
 
-        addSystemMessage(`[测试参数] 数字=${testNumber}, 颜色=${expectedColor}(${colorHex})`)
+        addSystemMessage(`[inputs] number=${testNumber}, colour=${expectedColor}(${colorHex})`)
 
         const injectScript = `
             (function() {
@@ -1037,7 +1037,7 @@ const sidepanel = (() => {
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
             if (!tab || !tab.id) {
-                addSystemMessage('[失败] 没有活动标签页。')
+                addSystemMessage('[failed] No active tab.')
                 return
             }
 
@@ -1045,35 +1045,35 @@ const sidepanel = (() => {
                 target: { tabId: tab.id },
                 func: new Function('return ' + injectScript)
             })
-            addSystemMessage('[步骤1] 测试画布已注入到当前页面。')
+            addSystemMessage('[step 1] Test canvas injected into the page.')
 
             await new Promise(r => setTimeout(r, 500))
 
             const ssResult = await chrome.runtime.sendMessage({ type: 'AGENT_TAKE_SCREENSHOT' })
             if (!ssResult || !ssResult.dataUrl) {
-                addSystemMessage('[失败] 截图获取失败。')
+                addSystemMessage('[failed] Could not capture a screenshot.')
                 return
             }
             const screenshotAttachment = dataUrlToAttachment(ssResult.dataUrl)
             if (!screenshotAttachment) {
-                addSystemMessage('[失败] 截图转换附件失败。')
+                addSystemMessage('[failed] Could not turn the screenshot into an attachment.')
                 return
             }
 
             const base64Len = screenshotAttachment.content.length
-            addSystemMessage(`[步骤2] 截图已捕获。类型: ${screenshotAttachment.mimeType}, base64长度: ${base64Len} 字符 (~${Math.round(base64Len * 0.75 / 1024)}KB)`)
+            addSystemMessage(`[step 2] Screenshot captured. type=${screenshotAttachment.mimeType}, base64 length=${base64Len} chars (~${Math.round(base64Len * 0.75 / 1024)}KB)`)
 
             if (!chatService.isConnected) {
                 const ok = await chatService.connect()
-                if (!ok) { addSystemMessage('[失败] 网关连接失败。'); return }
+                if (!ok) { addSystemMessage('[failed] Could not reach the gateway.'); return }
             }
             if (!sessionKey) {
                 sessionKey = await chatService.resolveSessionKey('main')
             }
 
-            const testPrompt = '这是一个自动化视觉验证测试。当前页面上覆盖了一个测试画布。请只看截图回答以下两个问题，用JSON格式返回：\n1. 画布上显示的四位数字是多少？\n2. 画布上按钮的背景色是什么颜色？\n\n请严格按此格式返回，不要包含其它内容：\n{"number": "四位数字", "color": "颜色名"}'
+            const testPrompt = 'This is an automated vision check. A test canvas is overlaid on the current page. Using only the screenshot, answer these two questions as JSON:\n1. What is the four-digit number shown on the canvas?\n2. What colour is the button background on the canvas?\n\nReturn exactly this shape and nothing else:\n{"number": "the four digits", "color": "the colour name"}'
 
-            addSystemMessage('[步骤3] 正在向模型发送截图并提问...')
+            addSystemMessage('[step 3] Sending the screenshot to the model...')
             const assistantId = addMessage('assistant', '', true)
             let fullResponse = ''
 
@@ -1090,7 +1090,7 @@ const sidepanel = (() => {
                     updateMessage(assistantId, fullResponse, false)
                 },
                 onError: (err) => {
-                    updateMessage(assistantId, '请求失败: ' + err, false, true)
+                    updateMessage(assistantId, 'Request failed: ' + err, false, true)
                     fullResponse = ''
                 }
             })
@@ -1101,11 +1101,11 @@ const sidepanel = (() => {
             }).catch(() => { })
 
             if (!fullResponse) {
-                addSystemMessage('[结果] 模型无回复，测试失败。')
+                addSystemMessage('[result] The model did not reply — check failed.')
                 return
             }
 
-            addSystemMessage('[步骤4] 正在校验模型回复...')
+            addSystemMessage('[step 4] Checking the reply...')
 
             let numberPass = false
             let colorPass = false
@@ -1123,34 +1123,34 @@ const sidepanel = (() => {
             if (!colorPass) colorPass = fullResponse.includes(expectedColor)
 
             const results = []
-            results.push(`  数字识别: ${numberPass ? '通过' : '失败'} (期望=${testNumber})`)
-            results.push(`  颜色识别: ${colorPass ? '通过' : '失败'} (期望=${expectedColor})`)
+            results.push(`  number read: ${numberPass ? 'pass' : 'fail'} (expected ${testNumber})`)
+            results.push(`  colour read: ${colorPass ? 'pass' : 'fail'} (expected ${expectedColor})`)
 
             if (numberPass && colorPass) {
-                addSystemMessage('===== 测试结果: 全部通过 =====\n' + results.join('\n') + '\n结论: 后端模型确实在使用截图进行视觉判断。')
+                addSystemMessage('===== Vision check: all passed =====\n' + results.join('\n') + '\nThe model is genuinely reading the screenshot.')
             } else {
-                addSystemMessage('===== 测试结果: 部分失败 =====\n' + results.join('\n') + '\n结论: 后端模型可能未正确接收或使用截图。请在 DevTools Network>WS 中检查 chat.send 帧是否包含 attachments 字段。')
+                addSystemMessage('===== Vision check: some failures =====\n' + results.join('\n') + '\nThe model may not be receiving the screenshot. In DevTools Network > WS, check whether the chat.send frame carries an attachments field.')
             }
         } catch (e) {
-            addSystemMessage('[异常] 视觉测试出错: ' + e.message)
+            addSystemMessage('[error] Vision check threw: ' + e.message)
         }
     }
 
     function runDiagnostics() {
-        const lines = ['===== 扩展诊断信息 =====']
-        lines.push(`连接状态: ${chatService ? (chatService.isConnected ? '已连接' : '未连接') : '未初始化'}`)
-        lines.push(`会话Key: ${sessionKey || '无'}`)
-        lines.push(`当前实例: ${activeClaw ? activeClaw.name + ' (' + activeClaw.id + ')' : '未选择'}`)
-        lines.push(`网关地址: ${activeClaw ? activeClaw.gatewayUrl : '无'}`)
-        lines.push(`待发截图: ${pendingScreenshot ? '有 (' + Math.round(pendingScreenshot.length * 0.75 / 1024) + 'KB)' : '无'}`)
-        lines.push(`消息数: ${messages.length}`)
-        lines.push(`历史记录数: ${conversationHistory.length}`)
-        lines.push(`Agent步数: ${agentStepCount}/${MAX_AGENT_STEPS}`)
-        lines.push(`生成中: ${isGenerating ? '是' : '否'}`)
-        lines.push(`Agent循环: ${agentLoopRunning ? '运行中' : '空闲'}`)
+        const lines = ['===== Extension diagnostics =====']
+        lines.push(`connection: ${chatService ? (chatService.isConnected ? 'connected' : 'disconnected') : 'not initialised'}`)
+        lines.push(`session key: ${sessionKey || 'none'}`)
+        lines.push(`instance: ${activeClaw ? activeClaw.name + ' (' + activeClaw.id + ')' : 'none selected'}`)
+        lines.push(`gateway: ${activeClaw ? activeClaw.gatewayUrl : 'none'}`)
+        lines.push(`pending screenshot: ${pendingScreenshot ? 'yes (' + Math.round(pendingScreenshot.length * 0.75 / 1024) + 'KB)' : 'none'}`)
+        lines.push(`messages: ${messages.length}`)
+        lines.push(`history entries: ${conversationHistory.length}`)
+        lines.push(`agent steps: ${agentStepCount}/${MAX_AGENT_STEPS}`)
+        lines.push(`generating: ${isGenerating ? 'yes' : 'no'}`)
+        lines.push(`agent loop: ${agentLoopRunning ? 'running' : 'idle'}`)
         lines.push('---')
-        lines.push('附件管道: gatherPageContext -> buildMessageAttachments -> dataUrlToAttachment -> chat.send.attachments')
-        lines.push('诊断日志: 打开 DevTools Console 过滤 [ChatService][附件诊断] 可查看每次发包的附件统计')
+        lines.push('attachment pipeline: gatherPageContext -> buildMessageAttachments -> dataUrlToAttachment -> chat.send.attachments')
+        lines.push('Logs: open DevTools Console and filter on [ChatService][attachments] for per-message attachment counts')
         lines.push('=============================')
         addSystemMessage(lines.join('\n'))
     }
@@ -1240,7 +1240,7 @@ const sidepanel = (() => {
                 } else {
                     const rendered = formatMarkdown(content)
                     const shimmer = msg.isStreaming ? ' sp-streaming' : ''
-                    const actions = msg.isStreaming ? '' : `<div class="sp-msg-actions"><button class="sp-msg-action-btn" onclick="sidepanel.copyMessage(this)" title="复制"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button></div>`
+                    const actions = msg.isStreaming ? '' : `<div class="sp-msg-actions"><button class="sp-msg-action-btn" onclick="sidepanel.copyMessage(this)" title="Copy"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button></div>`
                     el.innerHTML = `<div class="sp-msg-content sp-msg-ai-content${shimmer}">${rendered}</div>${actions}`
                 }
             }
@@ -1279,16 +1279,16 @@ const sidepanel = (() => {
         const sendBtn = $('#sp-btn-send')
         if (isGenerating) {
             sendBtn.classList.add('generating')
-            sendBtn.title = '停止生成'
+            sendBtn.title = 'Stop generating'
         } else {
             sendBtn.classList.remove('generating')
-            sendBtn.title = '发送'
+            sendBtn.title = 'Send'
         }
     }
 
     function showAgentBanner(text) {
         const banner = $('#sp-agent-banner')
-        $('#sp-agent-status-text').textContent = text || '智能体工作中...'
+        $('#sp-agent-status-text').textContent = text || 'Agent working...'
         banner.classList.remove('hidden')
     }
 
@@ -1418,7 +1418,7 @@ const sidepanel = (() => {
         const list = $('#sp-shortcuts-list')
 
         if (shortcuts.length === 0) {
-            list.innerHTML = '<div class="sp-shortcuts-empty">暂无快捷方式</div>'
+            list.innerHTML = '<div class="sp-shortcuts-empty">No shortcuts yet</div>'
             return
         }
 
@@ -1628,7 +1628,7 @@ const sidepanel = (() => {
 
         codeBlocks.forEach((block, idx) => {
             const langLabel = block.lang ? `<span class="sp-code-lang">${escapeHtml(block.lang)}</span>` : ''
-            const copyBtn = `<button class="sp-code-copy-btn" title="复制"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button>`
+            const copyBtn = `<button class="sp-code-copy-btn" title="Copy"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button>`
             const replacement = `<div class="sp-code-block"><div class="sp-code-header">${langLabel}${copyBtn}</div><pre><code>${escapeHtml(block.code)}</code></pre></div>`
             html = html.replace(`\x00CODEBLOCK_${idx}\x00`, replacement)
         })

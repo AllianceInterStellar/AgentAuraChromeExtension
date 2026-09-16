@@ -173,7 +173,7 @@
         pulseEl.className = ''
         pulseEl.id = 'agentaura-pulse'
         pulseEl.classList.add('complete')
-        textEl.textContent = '任务完成'
+        textEl.textContent = 'Task complete'
 
         setTimeout(hide, 3000)
     }
@@ -185,7 +185,7 @@
         pulseEl.className = ''
         pulseEl.id = 'agentaura-pulse'
         pulseEl.classList.add('error')
-        textEl.textContent = msg || '操作失败'
+        textEl.textContent = msg || 'Action failed'
 
         setTimeout(hide, 5000)
     }
