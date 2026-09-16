@@ -29,6 +29,7 @@ const I18n = (() => {
             'agent.stop': 'Stop',
             'agent.stop.title': 'Stop agent',
             'agent.tabCount': '{count} tabs',
+            'agent.tabCount.one': '1 tab',
 
             // Empty state
             'empty.title': 'What can I do for you?',
@@ -442,6 +443,7 @@ const I18n = (() => {
             'agent.stop': '停止',
             'agent.stop.title': '停止智能体',
             'agent.tabCount': '{count} 个标签页',
+            'agent.tabCount.one': '1 个标签页',
 
             // Empty state
             'empty.title': '你需要我做什么？',

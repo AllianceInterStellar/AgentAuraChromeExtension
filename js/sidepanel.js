@@ -49,6 +49,7 @@ const sidepanel = (() => {
     async function init() {
         await I18n.init()
         I18n.applyToPage()
+        updateTabCount()
 
         await authService.init()
         await permissionManager.init()
@@ -338,6 +339,7 @@ const sidepanel = (() => {
             if (activeTab && activeTab.id) {
                 automationEngine.activeTabId = activeTab.id
                 await tabManager.ensureGroup(activeTab.id, 'AgentAura')
+                updateTabCount()
                 await chrome.runtime.sendMessage({
                     type: 'AGENT_GROUP_STATUS',
                     state: {
@@ -579,6 +581,7 @@ const sidepanel = (() => {
             }
 
             const tabs = await tabManager.listTabs(activeTab.id)
+            updateTabCount()
             return {
                 currentTabId: activeTab.id,
                 tabs: (tabs || []).map(tab => ({
@@ -961,6 +964,27 @@ const sidepanel = (() => {
 
         await new Promise(r => setTimeout(r, 500))
         await gatherPageContext(true)
+    }
+
+    /**
+     * Keeps the tab-group chip in step with the group the agent is actually driving.
+     *
+     * The chip is not wired through applyToPage: its label interpolates {count}, and
+     * applyToPage would write the template through literally. So it is updated wherever the
+     * group changes, and hidden while there is no group — a chip reading "0 tabs" looks like
+     * a counter that is stuck rather than a state worth showing.
+     */
+    function updateTabCount() {
+        const count = tabManager.getTabCount()
+        const label = $('#sp-tab-count')
+        // English needs the singular; Chinese does not distinguish, and its entry is the
+        // same string, so the branch costs nothing there.
+        if (label)
+            label.textContent = count === 1
+                ? I18n.t('agent.tabCount.one')
+                : I18n.t('agent.tabCount', { count })
+        const indicator = $('#sp-tab-group-indicator')
+        if (indicator) indicator.classList.toggle('hidden', count === 0)
     }
 
     function notifyAgentGroupState(status) {
