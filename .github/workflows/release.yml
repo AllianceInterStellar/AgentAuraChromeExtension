@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # A tag that disagrees with the manifest ships a package whose filename and whose
+      # self-reported version are different numbers. Chrome shows the manifest's.
+      - name: Tag and manifest must agree
+        id: version
+        run: |
+          version=$(node -p "require('./manifest.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Manifest version: $version"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [ "$tag_version" != "$version" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match manifest version $version"
+              exit 1
+            fi
+          fi
+
+      # Only what the browser actually loads. The test scripts and CI config have no business
+      # inside a package users install, and Chrome Web Store review asks about unused files.
+      - name: Build the package
+        id: package
+        run: |
+          version='${{ steps.version.outputs.version }}'
+          name="agentaura-chrome-extension-${version}.zip"
+          staging="$RUNNER_TEMP/pkg"
+          mkdir -p "$staging"
+          cp -R manifest.json popup.html sidepanel.html css icons js pages LICENSE "$staging/"
+          # manifest.json has to sit at the root of the zip, not inside a folder.
+          (cd "$staging" && zip -qr "$GITHUB_WORKSPACE/$name" . -x '*.DS_Store')
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Built $name ($(du -h "$name" | cut -f1))"
+
+      # Everything below inspects the ARTEFACT, not the repository. A package can be broken
+      # in ways the source tree is not — a file left out of the copy list is exactly that.
+      - name: Inspect the package
+        run: |
+          name='${{ steps.package.outputs.name }}'
+          out="$RUNNER_TEMP/unpacked"
+          mkdir -p "$out" && unzip -q "$name" -d "$out"
+
+          fail=0
+          for forbidden in test .github README.md .gitignore; do
+            if [ -e "$out/$forbidden" ]; then
+              echo "::error::$forbidden was packaged"; fail=1
+            fi
+          done
+          [ -f "$out/manifest.json" ] || { echo "::error::manifest.json is not at the zip root"; fail=1; }
+
+          node --input-type=module -e "
+          import { readFileSync, existsSync } from 'node:fs'
+          import { join } from 'node:path'
+          const root = process.argv[1]
+          const m = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'))
+          const referenced = [
+              m.background?.service_worker,
+              m.side_panel?.default_path,
+              m.options_page,
+              ...Object.values(m.icons ?? {}),
+              ...Object.values(m.action?.default_icon ?? {}),
+              ...(m.content_scripts ?? []).flatMap(c => c.js ?? []),
+          ].filter(Boolean)
+          const missing = referenced.filter(f => !existsSync(join(root, f)))
+          if (missing.length) {
+              for (const f of missing) console.error('::error::packaged manifest references a missing file: ' + f)
+              process.exit(1)
+          }
+          console.log(\`package ok — \${referenced.length} referenced files present inside the zip\`)
+          " "$out"
+          exit $fail
+
+      # The strongest check available without a human: give the unpacked package to a real
+      # Chrome and see whether the service worker comes up. A manifest can be valid, every
+      # referenced file can be present, and the extension can still fail to register.
+      - name: Load the package in Chrome
+        run: |
+          npm install --no-save playwright@1.58.2
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends xvfb
+          cat > /tmp/load-check.mjs <<'JS'
+          import { chromium } from 'playwright'
+          import os from 'node:os'
+          import path from 'node:path'
+
+          const ext = process.argv[2]
+          const profile = path.join(os.tmpdir(), `load-check-${Date.now()}`)
+          const ctx = await chromium.launchPersistentContext(profile, {
+              headless: false,
+              args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
+          })
+
+          // The worker may already be up by the time we look, so check before waiting.
+          let worker = ctx.serviceWorkers()[0]
+          if (!worker) {
+              worker = await ctx.waitForEvent('serviceworker', { timeout: 30000 })
+                  .catch(() => null)
+          }
+          if (!worker) {
+              console.error('::error::the extension loaded but no service worker registered')
+              await ctx.close()
+              process.exit(1)
+          }
+          const id = new URL(worker.url()).host
+          console.log(`service worker registered — extension id ${id}`)
+          console.log(`  ${worker.url()}`)
+
+          // The side panel is the whole UI; if its document cannot be opened the package is
+          // useless even though the worker came up.
+          const page = await ctx.newPage()
+          const res = await page.goto(`chrome-extension://${id}/sidepanel.html`, {
+              waitUntil: 'domcontentloaded', timeout: 20000,
+          }).catch(e => { console.error('::error::side panel failed to open: ' + e.message); return null })
+          if (!res) { await ctx.close(); process.exit(1) }
+          const title = await page.title()
+          console.log(`side panel opened — "${title}"`)
+
+          await ctx.close()
+          JS
+          xvfb-run -a node /tmp/load-check.mjs "$RUNNER_TEMP/unpacked"
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.name }}
+          generate_release_notes: true
+          body: |
+            Unpacked Chrome extension, version ${{ steps.version.outputs.version }}.
+
+            **Install:** download the zip, extract it, then in Chrome go to
+            `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**
+            on the extracted folder.
+
+            The package contains only what the browser loads — no test scripts, no CI
+            config. Before publishing, this build was unpacked and loaded into a real
+            Chrome to confirm its service worker registers and the side panel opens.
+
+            You will need an AgentAura account and a deployed agent gateway for it to talk to.
