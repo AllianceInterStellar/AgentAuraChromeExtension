@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentAura</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Auth Screen (shown when not logged in) -->
+    <div id="auth-screen" class="hidden">
+        <div class="header">
+            <span class="header-title">AgentAura</span>
+        </div>
+        <div class="auth-container">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#EF5350" viewBox="0 0 256 256">
+                <path
+                    d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm-8-80V80a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,172Z" />
+            </svg>
+            <h2 class="auth-title" data-i18n="auth.welcome">Welcome to AgentAura</h2>
+            <p class="auth-subtitle" data-i18n="auth.subtitle">Sign in to manage your OpenClaw instances</p>
+
+            <div id="auth-error" class="error-msg hidden"></div>
+
+            <div class="auth-form">
+                <div class="form-group">
+                    <label class="form-label" data-i18n="auth.email">Email</label>
+                    <input type="email" id="auth-email" class="form-input" data-i18n-placeholder="auth.emailPlaceholder"
+                        placeholder="you@example.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" data-i18n="auth.password">Password</label>
+                    <input type="password" id="auth-password" class="form-input"
+                        data-i18n-placeholder="auth.passwordPlaceholder" placeholder="••••••••">
+                </div>
+                <button id="btn-sign-in" class="btn btn-primary btn-full" data-i18n="auth.signIn">Sign In</button>
+                <button id="btn-sign-up" class="btn btn-secondary btn-full" data-i18n="auth.signUp">Create
+                    Account</button>
+
+                <div class="auth-divider" data-i18n="auth.or">or</div>
+
+                <button id="btn-guest" class="btn btn-secondary btn-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm40-92a12,12,0,1,1-12-12A12,12,0,0,1,168,124Zm-68,0a12,12,0,1,1-12-12A12,12,0,0,1,100,124Zm84.51,44a8,8,0,1,1-13,9.29,52,52,0,0,0-87,0,8,8,0,1,1-13-9.29,68,68,0,0,1,113,0Z" />
+                    </svg>
+                    <span data-i18n="auth.guest">Continue as Guest</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App (shown when logged in) -->
+    <div id="main-app" class="hidden">
+        <!-- Header -->
+        <div class="header">
+            <span class="header-title">AgentAura</span>
+            <div class="header-actions">
+                <button id="btn-open-agent" class="icon-btn" data-i18n-title="header.openAgent" title="Open Agent Panel"
+                    style="color: #EF5350;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M197.58,129.06l-51.61-19-19-51.65a15.92,15.92,0,0,0-29.88,0L78.07,110l-51.65,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0l19-51.61,51.65-19a15.92,15.92,0,0,0,0-29.88Z" />
+                    </svg>
+                </button>
+                <button id="btn-refresh" class="icon-btn" data-i18n-title="header.refresh" title="Refresh">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M224,48V96a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h28.69L182.06,73.37a79.56,79.56,0,0,0-56.13-23.43h-.45A79.52,79.52,0,0,0,69.59,72.71,8,8,0,0,1,58.33,61.29,96,96,0,0,1,192.93,60.7L208,75.52V48a8,8,0,0,1,16,0Zm-32.55,135.29a79.48,79.48,0,0,1-56,23.54c-.15,0-.3,0-.45,0a79.52,79.52,0,0,1-56.13-23.43L64,168.69V200a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8H104a8,8,0,0,1,0,16H75.31l14.63,14.63A63.53,63.53,0,0,0,134.68,193h.36a63.63,63.63,0,0,0,44.81-18.72,8,8,0,0,1,11.32,11.32Z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-tab="claws">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,16a87.48,87.48,0,0,1,51.06,16.31l-9.12,5.07a8,8,0,0,0-3.54,4.34l-6,19.74a8,8,0,0,0,1.78,7.58L175.4,107.7a8,8,0,0,0,3.84,2.35l13.87,3.72a8,8,0,0,0,5.34-.43l11.7-5.17A87.81,87.81,0,0,1,216,128c0,1-.05,2-.1,3l-13.54-3.29a8,8,0,0,0-6.78,1.45l-16,12.21a8,8,0,0,0-3,5.41l-2.41,19.43a8,8,0,0,0,4.41,8.19l11.84,5.72A87.66,87.66,0,0,1,128,216a87.5,87.5,0,0,1-55.47-19.79l1-1.65a8,8,0,0,0,.85-5l-3.69-23.06a8,8,0,0,0-4.81-6L45.52,151.69a8,8,0,0,0-5.93-.08l-5.69,2.05A87.82,87.82,0,0,1,40,128a88.18,88.18,0,0,1,15.18-49.57l0,.29a8,8,0,0,0,2.83,6.45l15.49,13.28a8,8,0,0,0,3.92,1.82l19.43,2.91a8,8,0,0,0,7.05-2.49L124.1,78.06a8,8,0,0,0,1.9-6.36l-2.52-19.11A8,8,0,0,0,120.14,47L106.46,40.9A87.56,87.56,0,0,1,128,40Z" />
+                </svg>
+                <span data-i18n="nav.claws">Claws</span>
+            </button>
+            <button class="nav-tab" data-tab="deploy">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z" />
+                </svg>
+                <span data-i18n="nav.deploy">Deploy</span>
+            </button>
+            <button class="nav-tab" data-tab="chat">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M216,48H40A16,16,0,0,0,24,64V224a15.84,15.84,0,0,0,9.25,14.5A16.05,16.05,0,0,0,40,240a15.89,15.89,0,0,0,10.25-3.78.69.69,0,0,0,.13-.11L82.5,208H216a16,16,0,0,0,16-16V64A16,16,0,0,0,216,48ZM40,224h0ZM216,192H82.5a16,16,0,0,0-10.3,3.75l-.12.11L40,224V64H216Z" />
+                </svg>
+                <span data-i18n="nav.chat">Chat</span>
+            </button>
+            <button class="nav-tab" data-tab="config">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.68l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.67a73.68,73.68,0,0,1-8.68,0,8,8,0,0,0-5.68,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.67,73.68,73.68,0,0,1,0-8.68A8,8,0,0,0,54.4,117.8L40.2,100.07a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.68,1.74,73.68,73.68,0,0,1,8.68,0,8.06,8.06,0,0,0,5.68-1.74L155.93,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z" />
+                </svg>
+                <span data-i18n="nav.config">Config</span>
+            </button>
+            <button class="nav-tab" data-tab="storage">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M224,64H32A16,16,0,0,0,16,80v96a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V80A16,16,0,0,0,224,64Zm0,112H32V80H224v96ZM208,128a12,12,0,1,1-12-12A12,12,0,0,1,208,128Zm-40,0a12,12,0,1,1-12-12A12,12,0,0,1,168,128Z" />
+                </svg>
+                <span data-i18n="nav.storage">Storage</span>
+            </button>
+            <button class="nav-tab" data-tab="account">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M230.92,212c-15.23-26.33-38.7-45.21-66.09-54.16a72,72,0,1,0-73.66,0C63.78,166.78,40.31,185.66,25.08,212a8,8,0,1,0,13.85,8c18.84-32.56,52.14-52,89.07-52s70.23,19.44,89.07,52a8,8,0,1,0,13.85-8ZM72,96a56,56,0,1,1,56,56A56.06,56.06,0,0,1,72,96Z" />
+                </svg>
+                <span data-i18n="nav.account">Account</span>
+            </button>
+        </div>
+
+        <!-- Claws Page -->
+        <div id="page-claws" class="page active">
+            <div id="claws-loading" class="loading">
+                <div class="spinner"></div>
+            </div>
+            <div id="claws-empty" class="empty-state hidden">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,16a87.48,87.48,0,0,1,51.06,16.31l-9.12,5.07a8,8,0,0,0-3.54,4.34l-6,19.74a8,8,0,0,0,1.78,7.58L175.4,107.7a8,8,0,0,0,3.84,2.35l13.87,3.72a8,8,0,0,0,5.34-.43l11.7-5.17A87.81,87.81,0,0,1,216,128c0,1-.05,2-.1,3l-13.54-3.29a8,8,0,0,0-6.78,1.45l-16,12.21a8,8,0,0,0-3,5.41l-2.41,19.43a8,8,0,0,0,4.41,8.19l11.84,5.72A87.66,87.66,0,0,1,128,216a87.5,87.5,0,0,1-55.47-19.79l1-1.65a8,8,0,0,0,.85-5l-3.69-23.06a8,8,0,0,0-4.81-6L45.52,151.69a8,8,0,0,0-5.93-.08l-5.69,2.05A87.82,87.82,0,0,1,40,128a88.18,88.18,0,0,1,15.18-49.57l0,.29a8,8,0,0,0,2.83,6.45l15.49,13.28a8,8,0,0,0,3.92,1.82l19.43,2.91a8,8,0,0,0,7.05-2.49L124.1,78.06a8,8,0,0,0,1.9-6.36l-2.52-19.11A8,8,0,0,0,120.14,47L106.46,40.9A87.56,87.56,0,0,1,128,40Z" />
+                </svg>
+                <h3 data-i18n="claws.empty">No Claws Yet</h3>
+                <p data-i18n="claws.emptyDesc">Deploy your first OpenClaw instance to get started</p>
+                <button class="btn btn-primary" data-action="switch-tab" data-tab="deploy">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z" />
+                    </svg>
+                    <span data-i18n="claws.deployNow">Deploy Now</span>
+                </button>
+            </div>
+            <div id="claws-error" class="empty-state hidden">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#EF5350" viewBox="0 0 256 256">
+                    <path
+                        d="M236.8,188.09,149.35,36.22h0a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM222.93,203.8a8.5,8.5,0,0,1-7.48,4.2H40.55a8.5,8.5,0,0,1-7.48-4.2,7.59,7.59,0,0,1,0-7.72L120.52,44.21a8.75,8.75,0,0,1,15,0l87.45,151.87A7.59,7.59,0,0,1,222.93,203.8ZM120,144V104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,180Z" />
+                </svg>
+                <h3 data-i18n="claws.loadFailed">Failed to load</h3>
+                <p id="claws-error-msg" data-i18n="claws.errorDefault">Something went wrong</p>
+                <button class="btn btn-secondary" data-action="load-claws">
+                    <span data-i18n="claws.retry">Retry</span>
+                </button>
+            </div>
+            <div id="claws-list"></div>
+        </div>
+
+        <!-- Deploy Page -->
+        <div id="page-deploy" class="page">
+            <div id="deploy-form">
+                <div class="form-group">
+                    <label class="form-label" data-i18n="deploy.name">Instance Name</label>
+                    <input type="text" id="deploy-name" class="form-input"
+                        data-i18n-placeholder="deploy.namePlaceholder" placeholder="my-openclaw" maxlength="30">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" data-i18n="deploy.aiProvider">AI Provider</label>
+                    <div class="ai-provider-grid" id="ai-provider-grid"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" data-i18n="deploy.aiModel">AI Model</label>
+                    <select id="deploy-ai-model" class="form-select">
+                        <option value="" data-i18n="deploy.selectProvider">Select a provider first</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" data-i18n="deploy.cloudProvider">Cloud Provider</label>
+                    <div class="provider-grid" id="provider-grid"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" data-i18n="deploy.plan">Plan</label>
+                    <div id="plans-loading" class="loading hidden">
+                        <div class="spinner"></div>
+                    </div>
+                    <div id="plans-list"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" data-i18n="deploy.region">Region</label>
+                    <select id="deploy-region" class="form-select">
+                        <option value="" data-i18n="deploy.selectProvider">Select a provider first</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" data-i18n="deploy.method">Deployment Method</label>
+                    <select id="deploy-method" class="form-select">
+                        <option value="npm" data-i18n="deploy.npm">NPM (Recommended)</option>
+                        <option value="docker" data-i18n="deploy.docker">Docker</option>
+                    </select>
+                </div>
+
+                <button id="btn-deploy" class="btn btn-primary btn-full" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M152,224a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16h32A8,8,0,0,1,152,224Zm73.69-98.34-6.09,30A16,16,0,0,1,204,168H164.65l-6.36,42.38A8,8,0,0,1,150.37,216H105.63a8,8,0,0,1-7.92-5.62L91.35,168H52a16,16,0,0,1-15.61-12.38l-6.09-30A16.05,16.05,0,0,1,43.46,108L72,93.27V56a32,32,0,0,1,64,0V93.27L164.54,108A16.05,16.05,0,0,1,225.69,125.66Z" />
+                    </svg>
+                    <span data-i18n="deploy.button">Deploy OpenClaw</span>
+                </button>
+            </div>
+
+            <!-- Provision Progress (shown during deployment) -->
+            <div id="deploy-progress" class="hidden">
+                <div class="card">
+                    <div class="flex items-center justify-between mb-2">
+                        <span id="progress-title" style="font-weight: 600"
+                            data-i18n="deploy.deploying">Deploying...</span>
+                        <span id="progress-percent" class="text-accent" style="font-weight: 700">0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div id="progress-steps" class="provision-steps"></div>
+                    <div id="progress-logs" class="provision-logs hidden"></div>
+                </div>
+                <button id="btn-cancel-deploy" class="btn btn-danger btn-full mt-2" data-i18n="deploy.cancel">Cancel
+                    Deployment</button>
+                <button id="btn-view-claws" class="btn btn-primary btn-full mt-2 hidden"
+                    data-i18n="deploy.viewClaws">View My Claws</button>
+            </div>
+        </div>
+
+        <!-- Chat Page -->
+        <div id="page-chat" class="page">
+            <div id="chat-view" class="chat-view">
+                <!-- Chat Header -->
+                <div class="chat-header">
+                    <button class="icon-btn" id="btn-chat-back" data-i18n-title="chat.backToClaws"
+                        title="Back to Claws">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z" />
+                        </svg>
+                    </button>
+                    <div class="chat-header-info">
+                        <span id="chat-claw-name" class="chat-header-title">Chat</span>
+                    </div>
+                    <button class="icon-btn" id="btn-chat-new" data-i18n-title="chat.newSession" title="New Session">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z" />
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Chat Empty State -->
+                <div id="chat-empty" class="chat-empty-state">
+                    <div class="chat-empty-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M197.58,129.06l-51.61-19-19-51.65a15.92,15.92,0,0,0-29.88,0L78.07,110l-51.65,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0l19-51.61,51.65-19a15.92,15.92,0,0,0,0-29.88ZM140.39,163a15.87,15.87,0,0,0-9.43,9.43l-19,51.46L93,172.39A15.87,15.87,0,0,0,83.61,163l-51.46-19,51.46-19A15.87,15.87,0,0,0,93,115.61l18.93-51.46,19,51.46a15.87,15.87,0,0,0,9.43,9.43l51.46,19ZM144,40a8,8,0,0,1,8-8h16V16a8,8,0,0,1,16,0V32h16a8,8,0,0,1,0,16H184V64a8,8,0,0,1-16,0V48H152A8,8,0,0,1,144,40ZM248,88a8,8,0,0,1-8,8h-8v8a8,8,0,0,1-16,0V96h-8a8,8,0,0,1,0-16h8V72a8,8,0,0,1,16,0v8h8A8,8,0,0,1,248,88Z" />
+                        </svg>
+                    </div>
+                    <h3 data-i18n="chat.empty">有什么可以帮你的？</h3>
+                    <p data-i18n="chat.emptyDesc">发送消息，开始与你的 OpenClaw AI 助手对话</p>
+                </div>
+
+                <!-- Chat Messages -->
+                <div id="chat-messages" class="chat-messages"></div>
+
+                <!-- Chat No Claw State -->
+                <div id="chat-no-claw" class="chat-empty-state hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm-8-80V80a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,172Z" />
+                    </svg>
+                    <h3 data-i18n="chat.noClaw">未选择实例</h3>
+                    <p data-i18n="chat.noClawDesc">前往 Claws 标签页，点击运行中实例的「Chat」按钮</p>
+                    <button class="btn btn-primary" data-action="switch-tab" data-tab="claws">
+                        <span data-i18n="chat.viewInstances">查看实例</span>
+                    </button>
+                </div>
+
+                <!-- Chat Input -->
+                <div id="chat-input-bar" class="chat-input-bar">
+                    <div class="chat-input-wrapper">
+                        <textarea id="chat-input" class="chat-input" data-i18n-placeholder="chat.inputPlaceholder"
+                            placeholder="发送消息..." rows="1"></textarea>
+                    </div>
+                    <button id="btn-chat-send" class="chat-send-btn" title="Send">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M236.2,218.31A8,8,0,0,1,228,224H128a108,108,0,0,1,0-216h4a8,8,0,0,1,0,16h-4a92,92,0,0,0,0,184h92.69l-18.35-18.34a8,8,0,0,1,11.32-11.32l32,32a8,8,0,0,1,0,11.32Z" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Config Page -->
+        <div id="page-config" class="page">
+            <div class="form-group">
+                <label class="form-label" style="font-size: 14px; margin-bottom: 12px" data-i18n="config.aiKeys">AI API
+                    Keys</label>
+                <p class="text-muted" style="font-size: 11px; margin-bottom: 16px" data-i18n="config.aiKeysDesc">
+                    Configure your AI provider API keys for deploying OpenClaw with your preferred model.
+                </p>
+            </div>
+            <div id="ai-config-list"></div>
+
+            <div class="form-group" style="margin-top: 20px">
+                <label class="form-label" style="font-size: 14px; margin-bottom: 12px"
+                    data-i18n="config.providerTokens">Provider API Tokens</label>
+                <p class="text-muted" style="font-size: 11px; margin-bottom: 16px"
+                    data-i18n="config.providerTokensDesc">
+                    Configure your cloud provider API tokens to deploy OpenClaw instances.
+                </p>
+            </div>
+            <div id="config-list"></div>
+        </div>
+
+        <!-- Storage Page -->
+        <div id="page-storage" class="page">
+            <div class="form-group">
+                <label class="form-label" style="font-size: 14px; margin-bottom: 12px" data-i18n="storage.title">Cloud
+                    Storage</label>
+                <p class="text-muted" style="font-size: 11px; margin-bottom: 16px" data-i18n="storage.desc">
+                    Configure cloud storage remotes for persistent data backup and mount to your instances.
+                </p>
+            </div>
+            <div id="storage-remotes-list"></div>
+            <div id="storage-empty" class="empty-state hidden">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M160,40A88.09,88.09,0,0,0,81.29,88.67,64,64,0,1,0,72,216h88a88,88,0,0,0,0-176Zm0,160H72a48,48,0,0,1-2.64-96A88.72,88.72,0,0,0,72,128a8,8,0,0,0,16,0,72,72,0,1,1,72,72Z" />
+                </svg>
+                <h3 data-i18n="storage.empty">No Storage Remotes</h3>
+                <p data-i18n="storage.emptyDesc">Add a cloud storage remote to enable persistent backups</p>
+            </div>
+            <button class="btn btn-primary btn-full mt-2" id="btn-add-remote" style="margin-top: 12px">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z" />
+                </svg>
+                <span data-i18n="storage.addRemote">Add Storage Remote</span>
+            </button>
+
+            <!-- Add/Edit Remote Modal (inline) -->
+            <div id="storage-modal" class="storage-modal hidden">
+                <div class="storage-modal-header">
+                    <span id="storage-modal-title" style="font-weight: 600" data-i18n="storage.modalTitle">Add Storage
+                        Remote</span>
+                    <button class="icon-btn" id="btn-close-storage-modal">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" data-i18n="storage.remoteName">Remote Name</label>
+                    <input type="text" id="storage-remote-name" class="form-input"
+                        data-i18n-placeholder="storage.remoteNamePlaceholder" placeholder="my-backup">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" data-i18n="storage.remoteType">Storage Type</label>
+                    <select id="storage-remote-type" class="form-select">
+                        <option value="" data-i18n="storage.selectType">Select a type...</option>
+                    </select>
+                </div>
+                <div id="storage-remote-fields"></div>
+                <div class="config-actions" style="margin-top: 12px">
+                    <button class="btn btn-secondary" id="btn-cancel-remote" data-i18n="storage.cancel">Cancel</button>
+                    <button class="btn btn-primary" id="btn-save-remote" data-i18n="storage.save">Save Remote</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Account Page -->
+        <div id="page-account" class="page">
+            <div class="account-header">
+                <div id="account-avatar" class="avatar">?</div>
+                <div id="account-name" class="account-name">Loading...</div>
+                <div id="account-email" class="account-email"></div>
+                <div id="account-badge"></div>
+            </div>
+
+            <div class="account-section">
+                <div class="account-section-title" data-i18n="account.title">Account</div>
+                <div class="account-item hidden" id="btn-link-google">
+                    <div class="account-item-left">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M128,24A104,104,0,1,0,232,128a104,104,0,0,0-104-104Zm0,184a80,80,0,1,1,80-80a80.09,80.09,0,0,1-80,80Zm40-88H136V88a8,8,0,0,0-16,0v32H88a8,8,0,0,0,0,16h32v32a8,8,0,0,0,16,0V136h32a8,8,0,0,0,0-16Z" />
+                        </svg>
+                        <span class="account-item-label" data-role="label" data-i18n="auth.linkGoogle">Bind Google
+                            Account</span>
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#8E8E93" viewBox="0 0 256 256">
+                        <path
+                            d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z" />
+                    </svg>
+                </div>
+                <div class="account-item" id="btn-sign-out">
+                    <div class="account-item-left">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M112,216a8,8,0,0,1-8,8H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32h56a8,8,0,0,1,0,16H48V208h56A8,8,0,0,1,112,216Zm109.66-93.66-40-40a8,8,0,0,0-11.32,11.32L196.69,120H104a8,8,0,0,0,0,16h92.69l-26.35,26.34a8,8,0,0,0,11.32,11.32l40-40A8,8,0,0,0,221.66,122.34Z" />
+                        </svg>
+                        <span class="account-item-label" data-i18n="auth.signOut">Sign Out</span>
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#8E8E93" viewBox="0 0 256 256">
+                        <path
+                            d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z" />
+                    </svg>
+                </div>
+            </div>
+
+            <div class="account-section">
+                <div class="account-section-title" data-i18n="options.langLabel">Interface Language</div>
+                <div class="account-item">
+                    <div class="account-item-left">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88.08,88.08,0,0,1-85.23-66H93.49a119.94,119.94,0,0,0,69,0h50.72A88.08,88.08,0,0,1,128,216Zm58.88-82a103.42,103.42,0,0,1-26.88,34H96a103.42,103.42,0,0,1-26.88-34,103.36,103.36,0,0,1,0-12A103.36,103.36,0,0,1,96,88h64a103.42,103.42,0,0,1,26.88,34A103.36,103.36,0,0,1,186.88,134ZM128,40a88.08,88.08,0,0,1,85.23,66H161.05a120,120,0,0,0-66.1,0H42.77A88.08,88.08,0,0,1,128,40Z" />
+                        </svg>
+                        <span class="account-item-label" data-i18n="options.langLabel">Interface Language</span>
+                    </div>
+                    <select id="popup-language-select"
+                        style="min-width: 170px; background: var(--bg3); border: 1px solid var(--border); color: var(--text1); border-radius: 6px; padding: 4px 8px; font-size: 12px; outline: none;">
+                        <option value="ar">عربي</option>
+                        <option value="de">Deutsch</option>
+                        <option value="en">English</option>
+                        <option value="es">Español (Spain)</option>
+                        <option value="es-419">Español (LA)</option>
+                        <option value="fr">Français</option>
+                        <option value="it">Italiano</option>
+                        <option value="ja">日本語</option>
+                        <option value="ko">한국어</option>
+                        <option value="pl">Polski</option>
+                        <option value="pt-BR">Português (Brasil)</option>
+                        <option value="ru">Русский</option>
+                        <option value="tr">Türkçe</option>
+                        <option value="zh">简体中文</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="text-align: center; margin-top: 20px;">
+                <p class="text-muted" style="font-size: 10px" data-i18n="account.version">AgentAura Chrome Extension
+                    v3.0.0</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="js/i18n.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

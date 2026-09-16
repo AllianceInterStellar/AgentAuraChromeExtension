@@ -1,0 +1,13 @@
+node_modules/
+*.log
+.DS_Store
+
+# Build output from the store-packaging script
+dist/
+*.zip
+
+# Local test configuration — the gateway URL, token and claw id belong in your
+# environment, never in the repository.
+.env
+.env.*
+store-assets/

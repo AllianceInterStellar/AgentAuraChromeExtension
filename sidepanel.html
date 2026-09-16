@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentAura 智能助手</title>
+    <link rel="stylesheet" href="css/sidepanel.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Main View Tabs -->
+    <div class="sp-main-tabs">
+        <button class="sp-main-tab active" data-view="chat">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 256 256">
+                <path
+                    d="M216,48H40A16,16,0,0,0,24,64V224a15.84,15.84,0,0,0,9.25,14.5A16.05,16.05,0,0,0,40,240a15.89,15.89,0,0,0,10.25-3.78l.13-.11L82.5,208H216a16,16,0,0,0,16-16V64A16,16,0,0,0,216,48ZM40,224h0ZM216,192H82.5a16,16,0,0,0-10.3,3.75l-.12.11L40,224V64H216Z" />
+            </svg>
+            <span data-i18n="tab.chat">聊天</span>
+        </button>
+        <button class="sp-main-tab" data-view="manage">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 256 256">
+                <path
+                    d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06ZM199.87,123.66a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.68l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.67a73.68,73.68,0,0,1-8.68,0,8,8,0,0,0-5.68,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.67,73.68,73.68,0,0,1,0-8.68A8,8,0,0,0,54.4,117.8L40.2,100.07a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.68,1.74,73.68,73.68,0,0,1,8.68,0,8.06,8.06,0,0,0,5.68-1.74L155.93,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z" />
+            </svg>
+            <span data-i18n="tab.manage">管理</span>
+        </button>
+    </div>
+
+    <!-- Chat View -->
+    <div class="sp-view active" id="view-chat">
+
+        <!-- Top Bar -->
+        <div class="sp-topbar">
+            <div class="sp-topbar-left">
+                <span class="sp-logo">AgentAura</span>
+                <span class="sp-version">v3.0</span>
+            </div>
+            <div class="sp-topbar-actions">
+                <button class="sp-icon-btn" id="sp-btn-shortcuts" data-i18n-title="topbar.shortcuts" title="已保存的快捷提示">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M239.18,97.26A16.38,16.38,0,0,0,224.92,86l-59-4.76L143.14,26.15a16.36,16.36,0,0,0-30.27,0L90.11,81.23,31.08,86a16.46,16.46,0,0,0-9.37,28.86l45,38.83L53,211.75a16.38,16.38,0,0,0,24.5,17.82L128,198.49l50.53,31.08A16.38,16.38,0,0,0,203,211.75l-13.76-58.07,45-38.83A16.38,16.38,0,0,0,239.18,97.26Z" />
+                    </svg>
+                </button>
+                <button class="sp-icon-btn" id="sp-btn-schedule" data-i18n-title="topbar.schedule" title="定时任务">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm64-88a8,8,0,0,1-8,8H128a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v48h48A8,8,0,0,1,192,128Z" />
+                    </svg>
+                </button>
+                <button class="sp-icon-btn" id="sp-btn-export" data-i18n-title="topbar.export" title="导出对话">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M224,152v56a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V152a8,8,0,0,1,16,0v56H208V152a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,132.69V40a8,8,0,0,0-16,0v92.69L93.66,106.34a8,8,0,0,0-11.32,11.32Z" />
+                    </svg>
+                </button>
+                <button class="sp-icon-btn" id="sp-btn-settings" data-i18n-title="topbar.settings" title="设置">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z" />
+                    </svg>
+                </button>
+                <button class="sp-icon-btn" id="sp-btn-new-chat" data-i18n-title="topbar.newChat" title="新对话">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Permission Mode Selector -->
+        <div class="sp-permission-bar" id="sp-permission-bar">
+            <div class="sp-permission-modes">
+                <button class="sp-perm-btn active" data-mode="ask" data-i18n-title="perm.ask.title" title="每个操作前询问确认">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M140,180a12,12,0,1,1-12-12A12,12,0,0,1,140,180ZM128,72c-22.06,0-40,16.15-40,36v4a8,8,0,0,0,16,0v-4c0-11,10.77-20,24-20s24,9,24,20-10.77,20-24,20a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-.72c18.24-3.35,32-17.9,32-35.28C168,88.15,150.06,72,128,72Zm104,56A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z" />
+                    </svg>
+                    <span data-i18n="perm.ask">询问</span>
+                </button>
+                <button class="sp-perm-btn" data-mode="act" data-i18n-title="perm.act.title" title="直接执行操作并展示结果">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M197.58,129.06l-51.61-19-19-51.65a15.92,15.92,0,0,0-29.88,0L78.07,110l-51.65,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0l19-51.61,51.65-19a15.92,15.92,0,0,0,0-29.88Z" />
+                    </svg>
+                    <span data-i18n="perm.act">执行</span>
+                </button>
+                <button class="sp-perm-btn" data-mode="plan" data-i18n-title="perm.plan.title" title="先展示执行计划，批准后执行">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z" />
+                    </svg>
+                    <span data-i18n="perm.plan">计划</span>
+                </button>
+            </div>
+            <div class="sp-tab-group-indicator" id="sp-tab-group-indicator" title="Tab group active">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M245.66,74.34l-32-32a8,8,0,0,0-11.32,0L168,76.69,133.66,42.34a8,8,0,0,0-11.32,0l-96,96a8,8,0,0,0,0,11.32l32,32a8,8,0,0,0,11.32,0L104,147.31l34.34,34.35a8,8,0,0,0,11.32,0l96-96A8,8,0,0,0,245.66,74.34Z" />
+                </svg>
+                <span id="sp-tab-count">0 个标签页</span>
+            </div>
+        </div>
+
+        <!-- Agent Status Banner -->
+        <div class="sp-agent-banner hidden" id="sp-agent-banner">
+            <div class="sp-agent-status">
+                <div class="sp-agent-pulse"></div>
+                <span id="sp-agent-status-text" data-i18n="agent.working">智能体工作中...</span>
+            </div>
+            <div class="sp-agent-step" id="sp-agent-step">
+                <span data-i18n="agent.step.prefix"></span><span id="sp-step-current">0</span><span
+                    data-i18n="agent.step.mid"></span><span id="sp-step-total">0</span><span
+                    data-i18n="agent.step.suffix"></span>
+            </div>
+            <button class="sp-stop-btn" id="sp-btn-stop-agent" data-i18n-title="agent.stop.title" title="停止智能体">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M200,32H56A24,24,0,0,0,32,56V200a24,24,0,0,0,24,24H200a24,24,0,0,0,24-24V56A24,24,0,0,0,200,32Z" />
+                </svg>
+                <span data-i18n="agent.stop">停止</span>
+            </button>
+        </div>
+
+        <!-- Messages Area -->
+        <div class="sp-messages" id="sp-messages">
+            <!-- Empty state -->
+            <div class="sp-empty-state" id="sp-empty-state">
+                <div class="sp-empty-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M197.58,129.06l-51.61-19-19-51.65a15.92,15.92,0,0,0-29.88,0L78.07,110l-51.65,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0l19-51.61,51.65-19a15.92,15.92,0,0,0,0-29.88ZM140.39,163a15.87,15.87,0,0,0-9.43,9.43l-19,51.46L93,172.39A15.87,15.87,0,0,0,83.61,163l-51.46-19,51.46-19A15.87,15.87,0,0,0,93,115.61l18.93-51.46,19,51.46a15.87,15.87,0,0,0,9.43,9.43l51.46,19ZM144,40a8,8,0,0,1,8-8h16V16a8,8,0,0,1,16,0V32h16a8,8,0,0,1,0,16H184V64a8,8,0,0,1-16,0V48H152A8,8,0,0,1,144,40ZM248,88a8,8,0,0,1-8,8h-8v8a8,8,0,0,1-16,0V96h-8a8,8,0,0,1,0-16h8V72a8,8,0,0,1,16,0v8h8A8,8,0,0,1,248,88Z" />
+                    </svg>
+                </div>
+                <h3 data-i18n="empty.title">你需要我做什么？</h3>
+                <p data-i18n="empty.desc">我可以浏览网页、填写表单、点击按钮、阅读页面，并为你自动化各种任务。</p>
+                <div class="sp-suggestions">
+                    <button class="sp-suggestion" data-prompt="搜索最新的AI新闻并总结" data-i18n-prompt="empty.searchAI.prompt"
+                        data-i18n="empty.searchAI">搜索并总结AI新闻</button>
+                    <button class="sp-suggestion" data-prompt="打开我的邮箱检查未读邮件" data-i18n-prompt="empty.checkEmail.prompt"
+                        data-i18n="empty.checkEmail">检查邮件</button>
+                    <button class="sp-suggestion" data-prompt="用示例数据填写当前页面的表单" data-i18n-prompt="empty.fillForm.prompt"
+                        data-i18n="empty.fillForm">填写此表单</button>
+                    <button class="sp-suggestion" data-prompt="阅读当前页面并给我一份摘要" data-i18n-prompt="empty.summarize.prompt"
+                        data-i18n="empty.summarize">总结此页面</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Approval Overlay -->
+        <div class="sp-approval-overlay hidden" id="sp-approval-overlay">
+            <div class="sp-approval-card">
+                <div class="sp-approval-header">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="#FF9800" viewBox="0 0 256 256">
+                        <path
+                            d="M236.8,188.09,149.35,36.22h0a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09Z" />
+                    </svg>
+                    <span data-i18n="approval.title">操作需要审批</span>
+                </div>
+                <div class="sp-approval-action" id="sp-approval-action">
+                    <span class="sp-approval-type" id="sp-approval-type">click</span>
+                    <span class="sp-approval-desc" id="sp-approval-desc">Click on "Submit" button</span>
+                </div>
+                <div class="sp-approval-buttons">
+                    <button class="sp-btn sp-btn-secondary" id="sp-btn-deny" data-i18n="approval.deny">拒绝</button>
+                    <button class="sp-btn sp-btn-primary" id="sp-btn-approve" data-i18n="approval.approve">批准</button>
+                    <button class="sp-btn sp-btn-accent" id="sp-btn-approve-all"
+                        data-i18n="approval.approveAll">全部批准</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Plan Approval Overlay -->
+        <div class="sp-plan-overlay hidden" id="sp-plan-overlay">
+            <div class="sp-plan-card">
+                <div class="sp-plan-header">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="#4CAF50" viewBox="0 0 256 256">
+                        <path
+                            d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z" />
+                    </svg>
+                    <span data-i18n="plan.title">执行计划</span>
+                </div>
+                <div class="sp-plan-steps" id="sp-plan-steps"></div>
+                <div class="sp-plan-buttons">
+                    <button class="sp-btn sp-btn-secondary" id="sp-btn-reject-plan" data-i18n="plan.reject">拒绝</button>
+                    <button class="sp-btn sp-btn-primary" id="sp-btn-approve-plan"
+                        data-i18n="plan.execute">执行计划</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shortcuts Panel -->
+        <div class="sp-shortcuts-panel hidden" id="sp-shortcuts-panel">
+            <div class="sp-shortcuts-header">
+                <span data-i18n="shortcuts.title">已保存的快捷提示</span>
+                <button class="sp-icon-btn" id="sp-btn-close-shortcuts">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z" />
+                    </svg>
+                </button>
+            </div>
+            <div class="sp-shortcuts-search">
+                <input type="text" class="sp-search-input" id="sp-shortcuts-search"
+                    data-i18n-placeholder="shortcuts.search" placeholder="搜索快捷提示...">
+            </div>
+            <div class="sp-shortcuts-list" id="sp-shortcuts-list"></div>
+            <button class="sp-btn sp-btn-primary sp-btn-full" id="sp-btn-add-shortcut">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z" />
+                </svg>
+                <span data-i18n="shortcuts.add">添加快捷提示</span>
+            </button>
+        </div>
+
+        <!-- Schedule Panel -->
+        <div class="sp-shortcuts-panel hidden" id="sp-schedule-panel">
+            <div class="sp-shortcuts-header">
+                <span data-i18n="schedule.title">定时任务</span>
+                <button class="sp-icon-btn" id="sp-btn-close-schedule">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 256 256">
+                        <path
+                            d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z" />
+                    </svg>
+                </button>
+            </div>
+            <div class="sp-schedule-form">
+                <textarea id="sp-schedule-prompt" class="sp-input" data-i18n-placeholder="schedule.prompt"
+                    placeholder="输入定时任务提示词..." rows="2"></textarea>
+                <div class="sp-schedule-interval-row">
+                    <label data-i18n="schedule.interval">间隔 (分钟):</label>
+                    <input type="number" id="sp-schedule-interval" class="sp-schedule-interval-input" value="60"
+                        min="1">
+                </div>
+            </div>
+            <div class="sp-shortcuts-list" id="sp-schedule-list"></div>
+            <button class="sp-btn sp-btn-primary sp-btn-full" id="sp-btn-add-schedule">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                    viewBox="0 0 256 256">
+                    <path
+                        d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z" />
+                </svg>
+                <span data-i18n="schedule.add">添加定时任务</span>
+            </button>
+        </div>
+
+        <!-- Input Area -->
+        <div class="sp-input-area">
+            <div class="sp-claw-selector">
+                <select id="sp-claw-select" class="sp-claw-select">
+                    <option value="" data-i18n="input.selectClaw">选择实例...</option>
+                </select>
+            </div>
+            <div class="sp-input-bar">
+                <div class="sp-input-wrapper">
+                    <textarea id="sp-input" class="sp-input" data-i18n-placeholder="input.placeholder"
+                        placeholder="告诉我你想做什么..." rows="1"></textarea>
+                </div>
+                <div class="sp-input-actions">
+                    <button class="sp-icon-btn sp-screenshot-btn" id="sp-btn-screenshot"
+                        data-i18n-title="input.screenshot" title="包含截图">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M208,56H180.28l-13.51-20.26A8,8,0,0,0,160,32H96a8,8,0,0,0-6.66,3.56L75.71,56H48A24,24,0,0,0,24,80V192a24,24,0,0,0,24,24H208a24,24,0,0,0,24-24V80A24,24,0,0,0,208,56Zm-80,104a36,36,0,1,1,36-36A36,36,0,0,1,128,160Z" />
+                        </svg>
+                    </button>
+                    <button class="sp-icon-btn sp-record-btn" id="sp-btn-record" data-i18n-title="input.record"
+                        title="录制工作流">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm40-88a40,40,0,1,1-40-40A40,40,0,0,1,168,128Z" />
+                        </svg>
+                    </button>
+                    <button class="sp-send-btn" id="sp-btn-send" data-i18n-title="input.send" title="发送">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor"
+                            viewBox="0 0 256 256">
+                            <path
+                                d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L72.26,128,40.92,218.66A16,16,0,0,0,64,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89Z" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /view-chat -->
+
+    <!-- Manage View (iframe) -->
+    <div class="sp-view" id="view-manage">
+        <iframe id="manage-iframe" src="popup.html" frameborder="0"></iframe>
+    </div>
+
+    <script src="js/i18n.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/agent/automation-engine.js"></script>
+    <script src="js/agent/tab-manager.js"></script>
+    <script src="js/agent/permission-manager.js"></script>
+    <script src="js/agent/workflow-recorder.js"></script>
+    <script src="js/agent/shortcuts-manager.js"></script>
+    <script src="js/agent/task-scheduler.js"></script>
+    <script src="js/agent/skill-installer.js"></script>
+    <script src="js/sidepanel.js"></script>
+</body>
+
+</html>

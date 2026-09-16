@@ -1,0 +1,85 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Every file has to parse. An extension with a syntax error in a service worker fails
+      # silently at load time — Chrome just does not run it.
+      - name: Parse every script
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            node --check "$f" || { echo "::error file=$f::does not parse"; fail=1; }
+          done < <(find . -name node_modules -prune -o \( -name '*.js' -o -name '*.mjs' \) -print)
+          exit $fail
+
+      # A manifest that points at a file which is not there produces an extension that loads
+      # with a warning and then misbehaves in ways that look like logic bugs.
+      - name: Validate the manifest
+        run: |
+          node --input-type=module -e "
+          import { readFileSync, existsSync } from 'node:fs'
+          const m = JSON.parse(readFileSync('manifest.json', 'utf8'))
+          const problems = []
+          if (m.manifest_version !== 3) problems.push('manifest_version must be 3')
+          for (const key of ['name', 'version', 'description']) {
+              if (!m[key]) problems.push(\`missing \${key}\`)
+          }
+          const referenced = [
+              m.background?.service_worker,
+              m.side_panel?.default_path,
+              m.options_page,
+              ...Object.values(m.icons ?? {}),
+              ...Object.values(m.action?.default_icon ?? {}),
+              ...(m.content_scripts ?? []).flatMap(c => c.js ?? []),
+          ].filter(Boolean)
+          for (const f of referenced) {
+              if (!existsSync(f)) problems.push(\`manifest references a missing file: \${f}\`)
+          }
+          if (problems.length) {
+              for (const p of problems) console.error('::error::' + p)
+              process.exit(1)
+          }
+          console.log(\`manifest ok — \${referenced.length} referenced files all present\`)
+          "
+
+      # This repository once carried a working gateway token for a live machine. The gate
+      # exists so that cannot come back in silently.
+      - name: No credentials, no machine-local paths
+        run: |
+          fail=0
+          scan() {
+            local pattern="$1" label="$2"
+            local hits
+            # -e, because some patterns start with a dash and would parse as options.
+            hits=$(grep -rInE -e "$pattern" . \
+              --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.github || true)
+            if [ -n "$hits" ]; then
+              echo "::error::$label"
+              echo "$hits"
+              fail=1
+            fi
+          }
+          # A 64-hex literal is the shape of a gateway token. Nothing here legitimately has one.
+          scan "['\"][0-9a-f]{64}['\"]" "64-hex literal — looks like a gateway token"
+          # Only /Users/ — this is a macOS shop and that is what leaked. /home/openclaw
+          # paths are real: they name files on the remote agent, inside prompts sent to it.
+          scan "/Users/[a-z]" "absolute path from someone's machine"
+          # Requires an uppercase letter or digit in the body, so the all-x placeholder in
+          # the screenshot generator does not trip the gate while a real key still does.
+          scan "sk-ant-api03-[a-z0-9_-]*[A-Z0-9][A-Za-z0-9_-]{10,}" "Anthropic API key"
+          scan "ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}" "GitHub token"
+          scan "-----BEGIN [A-Z ]*PRIVATE KEY" "private key"
+          exit $fail
