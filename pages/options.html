@@ -294,6 +294,21 @@
             font-size: 11px;
             color: var(--text3);
         }
+
+        .community {
+            text-align: center;
+            margin-top: 6px;
+            font-size: 11px;
+        }
+
+        .community a {
+            color: var(--text3);
+            text-decoration: none;
+        }
+
+        .community a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 
@@ -418,6 +433,10 @@
 
     <button class="save-btn" id="btn-save" data-i18n="options.save">Save Settings</button>
     <div class="version" data-i18n="options.version">AgentAura v3.0.1</div>
+    <!-- Brand name, deliberately untranslated, so this link needs no new i18n key. -->
+    <div class="community">
+        <a href="https://discord.gg/PkqfnYSmZB" target="_blank" rel="noopener noreferrer">Discord</a>
+    </div>
 
     <script src="../js/i18n.js"></script>
     <script src="options.js"></script>
