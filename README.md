@@ -1,5 +1,7 @@
 # AgentAura Chrome Extension
 
+[![Discord](https://img.shields.io/badge/Discord-join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/PkqfnYSmZB)
+
 A Manifest V3 Chrome extension that puts an AI agent in a side panel and lets it act on the
 browser you are already looking at — open tabs, read pages, fill forms, click through flows —
 while you stay in control of how much it is allowed to do on its own.
@@ -84,6 +86,12 @@ token and claw id from the environment; see [test/README.md](test/README.md).
 live gateway. They are not unit tests and they do not run unattended in CI — they need a
 gateway to talk to. CI checks what can be checked without one: every file parses, and the
 manifest is valid.
+
+## Community
+
+[Our Discord](https://discord.gg/PkqfnYSmZB) has an `#agent-aura` channel for gateway and
+extension questions, and `#help-and-feedback` for everything else. Reproducible bugs are
+better as issues here so they stay searchable.
 
 ## Licence
 
