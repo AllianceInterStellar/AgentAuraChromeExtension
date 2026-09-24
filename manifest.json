@@ -20,6 +20,7 @@
         "downloads"
     ],
     "host_permissions": [
+        "https://awsapi.allianceinterstellar.com/*",
         "https://d1em8r2hdbckr6.cloudfront.net/*",
         "wss://*.digitalenginecore.com/*",
         "<all_urls>"

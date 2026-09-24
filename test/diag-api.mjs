@@ -78,7 +78,7 @@ async function main() {
     if (!fbRes.idToken) { console.log('Full response:', JSON.stringify(fbRes)); return }
     const idToken = fbRes.idToken
 
-    const API_BASE = process.env.API_URL || 'https://d1em8r2hdbckr6.cloudfront.net'
+    const API_BASE = process.env.API_URL || 'https://awsapi.allianceinterstellar.com'
     console.log('API:', API_BASE)
 
     console.log('\n--- GET /claws ---')

@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'https://d1em8r2hdbckr6.cloudfront.net'
+const DEFAULT_API_BASE_URL = 'https://awsapi.allianceinterstellar.com'
 let API_BASE_URL = DEFAULT_API_BASE_URL
 
 try {

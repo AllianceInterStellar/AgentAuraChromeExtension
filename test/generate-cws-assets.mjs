@@ -238,7 +238,7 @@ async function prepareOptions(page) {
                 { id: 't1', name: 'Check support inbox', intervalMinutes: 60, runCount: 12, enabled: true },
                 { id: 't2', name: 'Monitor cloud prices', intervalMinutes: 180, runCount: 5, enabled: false }
             ],
-            dev_api_url: 'https://d1em8r2hdbckr6.cloudfront.net'
+            dev_api_url: 'https://awsapi.allianceinterstellar.com'
         })
         if (typeof loadSettings === 'function') await loadSettings()
     })

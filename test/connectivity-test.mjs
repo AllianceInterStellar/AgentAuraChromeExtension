@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const API_BASE = 'https://d1em8r2hdbckr6.cloudfront.net'
+const API_BASE = 'https://awsapi.allianceinterstellar.com'
 const FIREBASE_API_KEY = 'AIzaSyBdKqX4ZPKnw1sM1c09_dGtiBJlFV13iSs'
 
 function getProxyAgent() {

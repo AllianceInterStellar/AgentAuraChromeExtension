@@ -25,7 +25,7 @@ const EXTENSION_PATH = resolve(__dirname, '..')
 
 const GATEWAY_URL = required('AGENTAURA_GATEWAY_URL', 'the gateway address to test against')
 const GATEWAY_TOKEN = required('AGENTAURA_GATEWAY_TOKEN', 'the gateway auth token (never commit one)')
-const API_BASE = 'https://d1em8r2hdbckr6.cloudfront.net'
+const API_BASE = 'https://awsapi.allianceinterstellar.com'
 
 const args = Object.fromEntries(
     process.argv.slice(2).map(a => {

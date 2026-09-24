@@ -35,7 +35,7 @@ function requireApiEnvPath() {
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const FIREBASE_API_KEY = 'AIzaSyBdKqX4ZPKnw1sM1c09_dGtiBJlFV13iSs'
-const API_BASE = process.env.API_URL || 'https://d1em8r2hdbckr6.cloudfront.net'
+const API_BASE = process.env.API_URL || 'https://awsapi.allianceinterstellar.com'
 const API_ENV_PATH = requireApiEnvPath()
 
 const log = (tag, msg) => console.log(`[${new Date().toISOString().slice(11, 19)}][${tag}] ${msg}`)

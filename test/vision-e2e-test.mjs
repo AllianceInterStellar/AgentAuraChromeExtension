@@ -18,7 +18,7 @@ import https from 'node:https'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 
 const FIREBASE_API_KEY = 'AIzaSyBdKqX4ZPKnw1sM1c09_dGtiBJlFV13iSs'
-const API_BASE = 'https://d1em8r2hdbckr6.cloudfront.net'
+const API_BASE = 'https://awsapi.allianceinterstellar.com'
 
 const log = (tag, msg) => console.log(`[${new Date().toISOString().slice(11, 19)}][${tag}] ${msg}`)
 const fail = (msg) => { console.error(`\n❌ FAIL: ${msg}\n`); process.exit(1) }
