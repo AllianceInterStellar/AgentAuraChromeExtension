@@ -70,6 +70,10 @@ the directory. There is no build step; the extension runs from source as it is.
 
 You will need an AgentAura account and a deployed agent gateway for it to talk to.
 
+This version runs one agent per account. The server enforces that; when it refuses a second
+deployment, the extension opens [allianceinterstellar.com](https://allianceinterstellar.com/pricing#agentaura-plans)
+in a new tab instead of showing an error.
+
 ## A note on the Firebase key in `js/auth.js`
 
 `js/auth.js` contains a Firebase Web API key. That is not an oversight and not a secret: a
@@ -84,8 +88,9 @@ token and claw id from the environment; see [test/README.md](test/README.md).
 
 `test/` holds integration scripts that drive a real Chrome with the extension loaded and a
 live gateway. They are not unit tests and they do not run unattended in CI — they need a
-gateway to talk to. CI checks what can be checked without one: every file parses, and the
-manifest is valid.
+gateway to talk to. CI checks what can be checked without one: every file parses, the
+manifest is valid, and the unit tests in `test/*.test.mjs` pass (`node --test test/*.test.mjs`;
+Node 22, nothing to install).
 
 ## Community
 

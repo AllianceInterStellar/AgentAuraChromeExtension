@@ -560,12 +560,6 @@ body {
     color: var(--text-muted);
 }
 
-.plan-card-price {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--accent);
-}
-
 /* Progress Bar */
 .progress-bar-container {
     width: 100%;
@@ -711,7 +705,7 @@ body {
     color: var(--warning);
 }
 
-.account-badge.pro {
+.account-badge.signed-in {
     background: var(--success-bg);
     color: var(--success);
 }

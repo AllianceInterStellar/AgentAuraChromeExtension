@@ -231,7 +231,7 @@ const I18n = (() => {
             'deploy.aiModel': 'AI Model',
             'deploy.selectProvider': 'Select a provider first',
             'deploy.cloudProvider': 'Cloud Provider',
-            'deploy.plan': 'Plan',
+            'deploy.plan': 'Server Size',
             'deploy.region': 'Region',
             'deploy.method': 'Deployment Method',
             'deploy.npm': 'NPM (Recommended)',
@@ -332,6 +332,7 @@ const I18n = (() => {
             'toast.storageMountFailed': 'Failed to mount storage!',
             'toast.fillNameAndType': 'Please fill in name and type!',
             'toast.confirmDeleteRemote': 'Delete this storage remote?',
+            'toast.oneAgentLimit': 'This version runs one agent. To run more, continue on allianceinterstellar.com.',
 
             // Options page
             'options.title': 'AgentAura Settings',
@@ -644,7 +645,7 @@ const I18n = (() => {
             'deploy.aiModel': 'AI 模型',
             'deploy.selectProvider': '请先选择提供商',
             'deploy.cloudProvider': '云服务商',
-            'deploy.plan': '套餐',
+            'deploy.plan': '服务器规格',
             'deploy.region': '地区',
             'deploy.method': '部署方式',
             'deploy.npm': 'NPM（推荐）',
@@ -742,6 +743,7 @@ const I18n = (() => {
             'toast.storageMountFailed': '挂载存储失败！',
             'toast.fillNameAndType': '请填写名称和类型！',
             'toast.confirmDeleteRemote': '确定删除此存储远程？',
+            'toast.oneAgentLimit': '此版本只能运行一个智能体。如需运行更多，请在 allianceinterstellar.com 继续。',
 
             // Options page
             'options.title': 'AgentAura 设置',
@@ -854,7 +856,8 @@ const I18n = (() => {
             'claws.deployNow': 'انشر الآن',
             'storage.addRemote': 'إضافة وحدة تخزين',
             'chat.newSession': 'محادثة جديدة',
-            'header.refresh': 'تحديث'
+            'header.refresh': 'تحديث',
+            'toast.oneAgentLimit': 'يشغّل هذا الإصدار وكيلًا واحدًا. لتشغيل المزيد، تابع على allianceinterstellar.com.'
         },
         de: {
             'auth.signIn': 'Anmelden',
@@ -876,7 +879,8 @@ const I18n = (() => {
             'claws.deployNow': 'Jetzt bereitstellen',
             'storage.addRemote': 'Speicher hinzufügen',
             'chat.newSession': 'Neue Sitzung',
-            'header.refresh': 'Aktualisieren'
+            'header.refresh': 'Aktualisieren',
+            'toast.oneAgentLimit': 'Diese Version betreibt einen Agenten. Um weitere zu betreiben, fahren Sie auf allianceinterstellar.com fort.'
         },
         es: {
             'auth.signIn': 'Iniciar sesión',
@@ -898,7 +902,8 @@ const I18n = (() => {
             'claws.deployNow': 'Desplegar ahora',
             'storage.addRemote': 'Agregar almacenamiento',
             'chat.newSession': 'Nueva sesión',
-            'header.refresh': 'Actualizar'
+            'header.refresh': 'Actualizar',
+            'toast.oneAgentLimit': 'Esta versión ejecuta un agente. Para ejecutar más, continúa en allianceinterstellar.com.'
         },
         'es-419': {
             'auth.signIn': 'Iniciar sesión',
@@ -920,7 +925,8 @@ const I18n = (() => {
             'claws.deployNow': 'Implementar ahora',
             'storage.addRemote': 'Agregar almacenamiento',
             'chat.newSession': 'Nueva sesión',
-            'header.refresh': 'Actualizar'
+            'header.refresh': 'Actualizar',
+            'toast.oneAgentLimit': 'Esta versión ejecuta un agente. Para ejecutar más, continúa en allianceinterstellar.com.'
         },
         fr: {
             'auth.signIn': 'Se connecter',
@@ -942,7 +948,8 @@ const I18n = (() => {
             'claws.deployNow': 'Déployer maintenant',
             'storage.addRemote': 'Ajouter un stockage',
             'chat.newSession': 'Nouvelle session',
-            'header.refresh': 'Actualiser'
+            'header.refresh': 'Actualiser',
+            'toast.oneAgentLimit': 'Cette version exécute un seul agent. Pour en exécuter davantage, continuez sur allianceinterstellar.com.'
         },
         it: {
             'auth.signIn': 'Accedi',
@@ -964,7 +971,8 @@ const I18n = (() => {
             'claws.deployNow': 'Distribuisci ora',
             'storage.addRemote': 'Aggiungi archiviazione',
             'chat.newSession': 'Nuova sessione',
-            'header.refresh': 'Aggiorna'
+            'header.refresh': 'Aggiorna',
+            'toast.oneAgentLimit': 'Questa versione esegue un agente. Per eseguirne altri, continua su allianceinterstellar.com.'
         },
         ja: {
             'auth.signIn': 'ログイン',
@@ -986,7 +994,8 @@ const I18n = (() => {
             'claws.deployNow': '今すぐデプロイ',
             'storage.addRemote': 'ストレージを追加',
             'chat.newSession': '新しいセッション',
-            'header.refresh': '更新'
+            'header.refresh': '更新',
+            'toast.oneAgentLimit': 'このバージョンで実行できるエージェントは 1 つです。さらに実行するには allianceinterstellar.com で続けてください。'
         },
         ko: {
             'auth.signIn': '로그인',
@@ -1008,7 +1017,8 @@ const I18n = (() => {
             'claws.deployNow': '지금 배포',
             'storage.addRemote': '스토리지 추가',
             'chat.newSession': '새 세션',
-            'header.refresh': '새로고침'
+            'header.refresh': '새로고침',
+            'toast.oneAgentLimit': '이 버전은 에이전트 하나를 실행합니다. 더 실행하려면 allianceinterstellar.com에서 계속하세요.'
         },
         pl: {
             'auth.signIn': 'Zaloguj się',
@@ -1030,7 +1040,8 @@ const I18n = (() => {
             'claws.deployNow': 'Wdróż teraz',
             'storage.addRemote': 'Dodaj magazyn',
             'chat.newSession': 'Nowa sesja',
-            'header.refresh': 'Odśwież'
+            'header.refresh': 'Odśwież',
+            'toast.oneAgentLimit': 'Ta wersja uruchamia jednego agenta. Aby uruchomić więcej, kontynuuj na allianceinterstellar.com.'
         },
         'pt-BR': {
             'auth.signIn': 'Entrar',
@@ -1052,7 +1063,8 @@ const I18n = (() => {
             'claws.deployNow': 'Implantar agora',
             'storage.addRemote': 'Adicionar armazenamento',
             'chat.newSession': 'Nova sessão',
-            'header.refresh': 'Atualizar'
+            'header.refresh': 'Atualizar',
+            'toast.oneAgentLimit': 'Esta versão executa um agente. Para executar mais, continue em allianceinterstellar.com.'
         },
         ru: {
             'auth.signIn': 'Войти',
@@ -1074,7 +1086,8 @@ const I18n = (() => {
             'claws.deployNow': 'Развернуть сейчас',
             'storage.addRemote': 'Добавить хранилище',
             'chat.newSession': 'Новая сессия',
-            'header.refresh': 'Обновить'
+            'header.refresh': 'Обновить',
+            'toast.oneAgentLimit': 'Эта версия запускает одного агента. Чтобы запустить больше, продолжите на allianceinterstellar.com.'
         },
         tr: {
             'auth.signIn': 'Giriş yap',
@@ -1096,7 +1109,8 @@ const I18n = (() => {
             'claws.deployNow': 'Şimdi dağıt',
             'storage.addRemote': 'Depolama ekle',
             'chat.newSession': 'Yeni oturum',
-            'header.refresh': 'Yenile'
+            'header.refresh': 'Yenile',
+            'toast.oneAgentLimit': 'Bu sürüm tek bir ajan çalıştırır. Daha fazlası için allianceinterstellar.com üzerinden devam edin.'
         }
     }
 

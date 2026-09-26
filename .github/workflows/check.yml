@@ -55,6 +55,11 @@ jobs:
           console.log(\`manifest ok — \${referenced.length} referenced files all present\`)
           "
 
+      # The unit tests stub fetch, chrome.* and the DOM, so they need no gateway, no network and
+      # no credentials. The integration scripts beside them do, and are not run here.
+      - name: Unit tests
+        run: node --test test/*.test.mjs
+
       # This repository once carried a working gateway token for a live machine. The gate
       # exists so that cannot come back in silently.
       - name: No credentials, no machine-local paths

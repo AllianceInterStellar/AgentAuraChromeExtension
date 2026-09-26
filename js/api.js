@@ -47,7 +47,13 @@ class ApiClient {
                 if (errorData.error) errorMessage = errorData.error
                 else if (errorData.message) errorMessage = errorData.message
             } catch { }
-            throw new Error(errorMessage)
+            // Callers that need to tell one refusal from another read the status and the
+            // request it answered, not the message text, which the server may reword.
+            const error = new Error(errorMessage)
+            error.status = response.status
+            error.method = method
+            error.path = path
+            throw error
         }
         return response.json()
     }
@@ -206,43 +212,6 @@ class ApiClient {
         }
     }
 
-    async createStripeCheckout({ priceAmountCents, planName, successUrl, cancelUrl }) {
-        try {
-            const result = await this._request('POST', '/stripe/checkout', {
-                priceAmountCents,
-                planName,
-                platform: 'chrome-extension',
-                successUrl,
-                cancelUrl
-            })
-            if (result && result.data) return result.data
-            return result
-        } catch (e) {
-            console.error('Error creating Stripe checkout:', e)
-            return null
-        }
-    }
-
-    async verifyStripeSession(sessionId) {
-        try {
-            const result = await this._request('POST', '/stripe/verify-session', { sessionId })
-            if (result && result.data) return result.data
-            return result
-        } catch (e) {
-            console.error('Error verifying Stripe session:', e)
-            return null
-        }
-    }
-
-    async getSubscriptionStatus() {
-        try {
-            return await this._request('GET', '/subscriptions/status')
-        } catch (e) {
-            console.error('Error fetching subscription status:', e)
-            return null
-        }
-    }
-
     async getCloudStorageConfigs() {
         try {
             const result = await this._request('GET', '/cloud-storage')
@@ -357,6 +326,16 @@ class ApiClient {
             return null
         }
     }
+}
+
+/**
+ * Whether a failed request is the server refusing to create another agent because the account
+ * already runs the one this version allows. POST /claws answers that with 402 and uses 402 for
+ * nothing else; every other refusal of that call (identity not verified, a deployment already
+ * running, the account cap, a provider error) has its own status and keeps its own message.
+ */
+function isOneAgentLimitRefusal(error) {
+    return error?.status === 402 && error.method === 'POST' && error.path === '/claws'
 }
 
 const apiClient = new ApiClient()

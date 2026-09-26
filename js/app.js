@@ -1,3 +1,5 @@
+const MORE_AGENTS_URL = 'https://allianceinterstellar.com/pricing#agentaura-plans'
+
 const PROVIDERS = [
     { id: 'hetzner', name: 'Hetzner', icon: '🟠' },
     { id: 'vultr', name: 'Vultr', icon: '🔵' },
@@ -790,9 +792,8 @@ function renderPlans(plans) {
         <div class="plan-card ${selectedPlan === plan.id ? 'selected' : ''}" data-plan-id="${escapeHtml(plan.id)}">
             <div class="plan-card-info">
                 <span class="plan-card-name">${escapeHtml(plan.name || plan.id)}</span>
-                <span class="plan-card-specs">${plan.cpu || '?'} vCPU · ${plan.memory || '?'} GB RAM · ${plan.storage || '?'} GB SSD</span>
+                <span class="plan-card-specs">${plan.cpu || '?'} vCPU · ${plan.memory || '?'} GB RAM · ${plan.storage || plan.disk || '?'} GB SSD</span>
             </div>
-            <span class="plan-card-price">${plan.price ? `$${plan.price}/mo` : ''}</span>
         </div>
     `).join('')
 
@@ -809,32 +810,34 @@ function renderPlans(plans) {
 function renderDefaultPlans(providerId) {
     const defaults = {
         hetzner: [
-            { id: 'cx22', name: 'CX22', cpu: 2, memory: 4, storage: 40, price: 5.35 },
-            { id: 'cx32', name: 'CX32', cpu: 4, memory: 8, storage: 80, price: 9.59 },
-            { id: 'cx42', name: 'CX42', cpu: 8, memory: 16, storage: 160, price: 18.59 }
+            { id: 'cx22', name: 'CX22', cpu: 2, memory: 4, storage: 40 },
+            { id: 'cx32', name: 'CX32', cpu: 4, memory: 8, storage: 80 },
+            { id: 'cx42', name: 'CX42', cpu: 8, memory: 16, storage: 160 }
         ],
         vultr: [
-            { id: 'vc2-1c-2gb', name: 'VC2 1C-2GB', cpu: 1, memory: 2, storage: 55, price: 10 },
-            { id: 'vc2-2c-4gb', name: 'VC2 2C-4GB', cpu: 2, memory: 4, storage: 80, price: 20 },
-            { id: 'vc2-4c-8gb', name: 'VC2 4C-8GB', cpu: 4, memory: 8, storage: 160, price: 40 }
+            { id: 'vc2-1c-2gb', name: 'VC2 1C-2GB', cpu: 1, memory: 2, storage: 55 },
+            { id: 'vc2-2c-4gb', name: 'VC2 2C-4GB', cpu: 2, memory: 4, storage: 80 },
+            { id: 'vc2-4c-8gb', name: 'VC2 4C-8GB', cpu: 4, memory: 8, storage: 160 }
         ],
         digitalocean: [
-            { id: 's-1vcpu-2gb', name: 'Basic 1vCPU', cpu: 1, memory: 2, storage: 50, price: 12 },
-            { id: 's-2vcpu-4gb', name: 'Basic 2vCPU', cpu: 2, memory: 4, storage: 80, price: 24 },
-            { id: 's-4vcpu-8gb', name: 'Basic 4vCPU', cpu: 4, memory: 8, storage: 160, price: 48 }
+            { id: 's-1vcpu-2gb', name: 'Basic 1vCPU', cpu: 1, memory: 2, storage: 50 },
+            { id: 's-2vcpu-4gb', name: 'Basic 2vCPU', cpu: 2, memory: 4, storage: 80 },
+            { id: 's-4vcpu-8gb', name: 'Basic 4vCPU', cpu: 4, memory: 8, storage: 160 }
         ],
         linode: [
-            { id: 'g6-nanode-1', name: 'Nanode 1GB', cpu: 1, memory: 1, storage: 25, price: 5 },
-            { id: 'g6-standard-1', name: 'Linode 2GB', cpu: 1, memory: 2, storage: 50, price: 10 },
-            { id: 'g6-standard-2', name: 'Linode 4GB', cpu: 2, memory: 4, storage: 80, price: 20 }
+            { id: 'g6-nanode-1', name: 'Nanode 1GB', cpu: 1, memory: 1, storage: 25 },
+            { id: 'g6-standard-1', name: 'Linode 2GB', cpu: 1, memory: 2, storage: 50 },
+            { id: 'g6-standard-2', name: 'Linode 4GB', cpu: 2, memory: 4, storage: 80 }
         ]
     }
-    const plans = defaults[providerId] || [
-        { id: 'starter', name: 'Starter', cpu: 1, memory: 1, storage: 10, price: 5 },
-        { id: 'standard', name: 'Standard', cpu: 2, memory: 2, storage: 20, price: 15 },
-        { id: 'performance', name: 'Performance', cpu: 4, memory: 4, storage: 40, price: 30 }
-    ]
-    renderPlans(plans)
+    // Only providers whose server types are known here get a fallback list. For the rest,
+    // saying the list did not load beats offering sizes the provider would reject.
+    if (!defaults[providerId]) {
+        document.getElementById('plans-list').innerHTML =
+            `<div class="text-muted" style="font-size: 11px">${escapeHtml(I18n.t('claws.loadFailed'))}</div>`
+        return
+    }
+    renderPlans(defaults[providerId])
 }
 
 function renderDefaultRegions(providerId, select) {
@@ -931,9 +934,20 @@ async function handleDeploy() {
             throw new Error(I18n.t('ui.failedCreateInstance'))
         }
     } catch (e) {
-        showToast(e.message, 'error')
+        if (isOneAgentLimitRefusal(e)) {
+            openMoreAgentsPage()
+            showToast(I18n.t('toast.oneAgentLimit'), 'info', 6000)
+        } else {
+            showToast(e.message, 'error')
+        }
         resetDeployForm()
     }
+}
+
+// The server decides how many agents an account runs. When it refuses another one, the
+// website opens in a new tab so the user can carry on from there.
+function openMoreAgentsPage() {
+    chrome.tabs.create({ url: MORE_AGENTS_URL })
 }
 
 function startProvisionPolling(clawId, isDeployPage = false) {
@@ -1331,7 +1345,7 @@ function updateAccountPage() {
         linkGoogle.classList.remove('hidden')
     } else {
         const statusKey = user.providerId === 'google.com' ? 'account.googleLinked' : 'account.signedIn'
-        badge.innerHTML = `<span class="account-badge pro">${I18n.t(statusKey)}</span>`
+        badge.innerHTML = `<span class="account-badge signed-in">${I18n.t(statusKey)}</span>`
         linkGoogle.classList.add('hidden')
     }
 }
@@ -1379,10 +1393,7 @@ function parsePlanSpecs(planId) {
         's-4vcpu-8gb': { cpu: 4, memory: 8, storage: 160 },
         'g6-nanode-1': { cpu: 1, memory: 1, storage: 25 },
         'g6-standard-1': { cpu: 1, memory: 2, storage: 50 },
-        'g6-standard-2': { cpu: 2, memory: 4, storage: 80 },
-        starter: { cpu: 1, memory: 1, storage: 10 },
-        standard: { cpu: 2, memory: 2, storage: 20 },
-        performance: { cpu: 4, memory: 4, storage: 40 }
+        'g6-standard-2': { cpu: 2, memory: 4, storage: 80 }
     }
     return specMap[lower] || { cpu: 0, memory: 0, storage: 0 }
 }
@@ -1590,13 +1601,13 @@ function escapeHtml(str) {
     return div.innerHTML
 }
 
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', duration = 3000) {
     const toast = document.getElementById('toast')
     toast.textContent = message
     toast.className = `toast ${type} show`
     setTimeout(() => {
         toast.classList.remove('show')
-    }, 3000)
+    }, duration)
 }
 
 async function handleMountStorage(clawId, btn) {

@@ -36,6 +36,7 @@ node e2e-agent-loop.mjs
 | `vision-e2e-test.mjs` | Screenshot-and-reason path |
 | `connectivity-test.mjs`, `diag-api.mjs`, `probe-gateway-*.mjs` | Narrow diagnostics for one layer at a time |
 | `generate-cws-assets.mjs` | Chrome Web Store screenshots, driven off mock data |
+| `one-agent-limit.test.mjs` | Unit test, no gateway needed: a 402 from `POST /claws` opens the website, every other failure keeps its error, no script calls a billing endpoint. Runs in CI |
 
 The `probe-*`, `fix-*` and `config-*` scripts were written to pin down specific failures and
 are kept because each one documents a protocol detail that is otherwise only in someone's
