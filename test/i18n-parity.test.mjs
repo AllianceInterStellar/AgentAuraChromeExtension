@@ -16,7 +16,7 @@ import { loadScripts, read, listFiles } from './helpers/load.mjs'
  * How many en keys zh may still lack. The Chinese table is being completed in parallel; drop
  * this to 0 once it lands so the two can never drift apart again.
  */
-const ZH_MISSING_ALLOWANCE = 5
+const ZH_MISSING_ALLOWANCE = 0
 
 const source = read('js/i18n.js')
 
