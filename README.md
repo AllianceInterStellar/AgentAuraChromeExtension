@@ -11,7 +11,8 @@ on an agent gateway you deploy, and this extension is the pair of hands.
 
 ## What it does
 
-- **Side-panel chat** (`Ctrl/Cmd+E`) that talks to your agent gateway over a WebSocket.
+- **Side-panel chat** (`Alt+Shift+E`; `Alt+Shift+A` opens the agent for the current tab) that
+  talks to your agent gateway over a WebSocket.
 - **Browser automation** driven by the model: navigation, clicks, typing, extraction. Actions
   go through the Chrome DevTools Protocol, so they work on pages that ignore synthetic events.
 - **An accessibility-tree view of the page** rather than raw HTML, so the model sees the
@@ -19,7 +20,10 @@ on an agent gateway you deploy, and this extension is the pair of hands.
 - **Workflow recording** — capture what you did once, replay it as a saved shortcut.
 - **Scheduled tasks** that run on an alarm and report back.
 - **Skill installation** onto the connected agent.
-- Twelve UI languages: ar, de, en, es, fr, it, ja, ko, pl, ru, tr, zh.
+- UI in English and Simplified Chinese, fully translated. Twelve more languages (ar, de, es,
+  es-419, fr, it, ja, ko, pl, pt-BR, ru, tr) are offered as well, but they currently translate
+  only the navigation and key notices and fall back to English everywhere else; they are
+  marked "(partial)" in the language menu.
 
 ## The permission model
 
@@ -41,7 +45,9 @@ Chrome shows a blunt warning for this extension, and the reasons are real rather
 incidental:
 
 - **`<all_urls>`** — the agent operates on whatever page you point it at. There is no useful
-  subset to request in advance.
+  subset to request in advance. The two content scripts (the accessibility-tree reader and the
+  on-page indicator) are injected into a tab the first time the agent acts on it, not into every
+  page you open.
 - **`debugger`** — automation attaches the DevTools Protocol to the tab. Synthetic DOM events
   are ignored by a lot of real sites; CDP input is not. Chrome shows its own "is being
   debugged" banner whenever this is active, which is the honest signal that it is on.
@@ -59,6 +65,10 @@ node scripts/dev-install.mjs
 That launches Chrome with the extension loaded and prints its id and side-panel URL. It uses
 a profile of its own, so the browser you are working in is untouched and you do not have to
 quit it. Node 22+; nothing to install.
+
+The manifest asks for Chrome 137 or newer. The side panel API needs 114, and the gateway
+handshake signs a challenge with an Ed25519 key through WebCrypto, which Chrome ships enabled
+from 137.
 
 > Chrome 137 disabled the `--load-extension` switch, and it is now ignored *silently* — which
 > looks exactly like the extension failing to load. The script uses what replaced it, the

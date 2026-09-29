@@ -417,7 +417,7 @@ const I18n = (() => {
             'deploy.stepSetupSsl': 'Setting up SSL',
             'deploy.stepFinalizing': 'Finalizing',
 
-            // Side panel messages added with the 3.0.3 fixes
+            // Side panel messages added with the reliability fixes
             'msg.copy': 'Copy',
             'shortcuts.empty': 'No shortcuts yet',
             'sys.authExpired': 'Your session has expired. Open Manage and sign in again.',
@@ -902,7 +902,7 @@ const I18n = (() => {
             'deploy.stepSetupSsl': '配置 SSL',
             'deploy.stepFinalizing': '收尾中',
 
-            // 3.0.3 修复新增的侧边栏文案
+            // 可靠性修复新增的侧边栏文案
             'msg.copy': '复制',
             'shortcuts.empty': '还没有快捷方式',
             'sys.authExpired': '登录已过期，请在"管理"页重新登录。',

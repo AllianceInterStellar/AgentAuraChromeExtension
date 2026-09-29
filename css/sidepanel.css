@@ -1,4 +1,5 @@
 :root {
+    color-scheme: dark;
     --bg-primary: #0A0A0A;
     --bg-secondary: #111111;
     --bg-container: #1A1A1A;
@@ -731,86 +732,6 @@ h4.sp-md-heading {
     }
 }
 
-/* Action Timeline in messages */
-.sp-action-timeline {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin: 10px 0;
-    padding: 10px 12px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-}
-
-.sp-action-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    font-size: 12px;
-}
-
-.sp-action-icon {
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    flex-shrink: 0;
-    font-size: 10px;
-}
-
-.sp-action-icon.completed {
-    background: var(--success-bg);
-    color: var(--success);
-}
-
-.sp-action-icon.pending {
-    background: var(--warning-bg);
-    color: var(--warning);
-}
-
-.sp-action-icon.failed {
-    background: rgba(239, 83, 80, 0.1);
-    color: var(--danger);
-}
-
-.sp-action-icon.running {
-    background: var(--info-bg);
-    color: var(--info);
-}
-
-.sp-action-detail {
-    flex: 1;
-}
-
-.sp-action-type {
-    font-weight: 600;
-    color: var(--text-primary);
-    text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 0.5px;
-}
-
-.sp-action-desc {
-    color: var(--text-secondary);
-}
-
-/* Screenshot in message */
-.sp-screenshot {
-    max-width: 100%;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    margin: 8px 0;
-    cursor: pointer;
-    transition: opacity 0.15s;
-}
-
-.sp-screenshot:hover {
-    opacity: 0.9;
-}
-
 /* Approval Overlay */
 .sp-approval-overlay,
 .sp-plan-overlay {
@@ -997,12 +918,19 @@ h4.sp-md-heading {
     padding: 0 14px;
 }
 
+/* Saved shortcuts render as <button>s (schedule items stay <div>s); the resets keep the old look. */
 .sp-shortcut-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    width: 100%;
     padding: 10px 8px;
+    background: none;
+    border: none;
     border-radius: var(--radius-sm);
+    color: inherit;
+    font: inherit;
+    text-align: start;
     cursor: pointer;
     transition: background 0.15s;
 }
@@ -1014,24 +942,6 @@ h4.sp-md-heading {
 .sp-shortcut-text {
     font-size: 12px;
     flex: 1;
-}
-
-.sp-shortcut-uses {
-    font-size: 10px;
-    color: var(--text-muted);
-}
-
-.sp-shortcut-delete {
-    opacity: 0;
-    background: none;
-    border: none;
-    color: var(--danger);
-    cursor: pointer;
-    padding: 4px;
-}
-
-.sp-shortcut-item:hover .sp-shortcut-delete {
-    opacity: 1;
 }
 
 /* Schedule Panel */
@@ -1272,60 +1182,18 @@ h4.sp-md-heading {
     }
 }
 
-/* Recording indicator */
-.sp-recording-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 14px;
-    background: rgba(239, 83, 80, 0.1);
-    border-bottom: 1px solid rgba(239, 83, 80, 0.2);
+/* Accessibility */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
-.sp-recording-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.sp-recording-dot {
-    width: 8px;
-    height: 8px;
-    background: var(--danger);
-    border-radius: 50%;
-    animation: recordPulse 1s infinite;
-}
-
-.sp-recording-text {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--danger);
-}
-
-.sp-recording-time {
-    font-size: 11px;
-    color: var(--text-muted);
-}
-
-.sp-recording-stop {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 500;
-    background: var(--danger);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-/* Scheduled task badge */
-.sp-schedule-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    font-size: 10px;
-    background: var(--info-bg);
-    color: var(--info);
-    border-radius: 12px;
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+    }
 }

@@ -202,6 +202,19 @@ test('the message exists in every interface language', () => {
     const languages = popup.run('I18n.getAvailableLanguages()').map(l => l.code)
     assert.equal(languages.length, 14)
 
+    // Only en and zh have a full table; the twelve others say so in their label, and
+    // getLanguageCoverage() is what the label is based on.
+    const coverage = popup.run('I18n.getLanguageCoverage()')
+    const labels = new Map(popup.run('I18n.getAvailableLanguages()').map(l => [l.code, l.label]))
+    assert.deepEqual(coverage.map(c => c.code), languages)
+    for (const { code, total, translated } of coverage) {
+        assert.ok(total > 0 && translated <= total, `${code} coverage ${translated}/${total}`)
+        const partial = labels.get(code).endsWith('(partial)')
+        assert.equal(partial, !['en', 'zh'].includes(code), `${code} label: ${labels.get(code)}`)
+        if (partial) assert.ok(translated < total / 2, `${code} is labelled partial but translates ${translated}/${total}`)
+        else assert.ok(translated > total * 0.9, `${code} is labelled complete but translates ${translated}/${total}`)
+    }
+
     const english = popup.run(`I18n.setLang('en'); I18n.t('toast.oneAgentLimit')`)
     assert.notEqual(english, 'toast.oneAgentLimit')
     for (const lang of languages) {
