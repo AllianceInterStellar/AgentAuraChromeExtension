@@ -8,12 +8,68 @@ const FIREBASE_CONFIG = {
 const AUTH_API = `https://identitytoolkit.googleapis.com/v1`
 const GOOGLE_OAUTH_SCOPES = ['openid', 'email', 'profile']
 
+// A Firebase id token lives for an hour. Refresh a little before that, and again on demand
+// when a request comes back 401.
+const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000
+const TOKEN_LIFETIME_FALLBACK_MS = 55 * 60 * 1000
+
 class AuthService {
     constructor() {
         this.currentUser = null
         this.idToken = null
         this.refreshToken = null
         this.listeners = []
+        this._refreshTimer = null
+        this._refreshing = null
+        this._applyingRemote = false
+
+        // Every page (side panel, the embedded manage page) has its own AuthService. The
+        // token lives in storage; when one context signs in, refreshes or signs out, the
+        // others follow instead of keeping a stale or different user.
+        try {
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area !== 'local') return
+                if (!('auth_id_token' in changes) && !('auth_user' in changes) && !('auth_refresh_token' in changes)) return
+                if (this._applyingRemote) return
+                this._adoptStoredAuth().catch(() => { })
+            })
+        } catch (_) { }
+
+        if (typeof apiClient !== 'undefined' && apiClient) {
+            apiClient.onUnauthorized = () => this.refreshAccessToken()
+        }
+    }
+
+    async _adoptStoredAuth() {
+        const stored = await chrome.storage.local.get(['auth_user', 'auth_id_token', 'auth_refresh_token'])
+        const changed = stored.auth_id_token !== this.idToken
+        this.currentUser = stored.auth_user || null
+        this.idToken = stored.auth_id_token || null
+        this.refreshToken = stored.auth_refresh_token || null
+        if (typeof apiClient !== 'undefined' && apiClient) apiClient.setAuthToken(this.idToken)
+        this._scheduleRefresh()
+        if (changed) this._notifyListeners()
+    }
+
+    /** Milliseconds until the current id token expires, read from its `exp` claim. */
+    _tokenRemainingMs() {
+        if (!this.idToken) return 0
+        try {
+            const payload = JSON.parse(atob(this.idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+            if (payload && payload.exp) return payload.exp * 1000 - Date.now()
+        } catch (_) { }
+        return TOKEN_LIFETIME_FALLBACK_MS
+    }
+
+    _scheduleRefresh() {
+        clearTimeout(this._refreshTimer)
+        this._refreshTimer = null
+        if (!this.refreshToken || !this.idToken) return
+        const delay = Math.max(this._tokenRemainingMs() - TOKEN_REFRESH_MARGIN_MS, 5000)
+        // Timers do not fire while the page is closed; init() and the 401 path cover that.
+        this._refreshTimer = setTimeout(() => {
+            this.refreshAccessToken().catch(() => { })
+        }, Math.min(delay, 2 ** 31 - 1))
     }
 
     onAuthStateChanged(callback) {
@@ -95,6 +151,7 @@ class AuthService {
         this.refreshToken = data.refreshToken || data.refresh_token || null
         apiClient.setAuthToken(this.idToken)
         await this._persistAuth()
+        this._scheduleRefresh()
         this._notifyListeners()
         return this.currentUser
     }
@@ -183,38 +240,70 @@ class AuthService {
             this.idToken = stored.auth_id_token
             this.refreshToken = stored.auth_refresh_token || null
             apiClient.setAuthToken(this.idToken)
+            // Waited for: the first request must not go out with a token that expired while
+            // the panel was closed.
+            if (this._tokenRemainingMs() < TOKEN_REFRESH_MARGIN_MS) {
+                await this.refreshAccessToken().catch(() => { })
+            }
+            this._scheduleRefresh()
             this._notifyListeners()
-            this._refreshTokenIfNeeded()
         }
     }
 
+    /** Kept for callers of the old name. */
     async _refreshTokenIfNeeded() {
-        if (!this.refreshToken) return
-        try {
-            const response = await fetch(
-                `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_CONFIG.apiKey}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        grant_type: 'refresh_token',
-                        refresh_token: this.refreshToken
-                    })
-                }
-            )
-            if (response.ok) {
-                const data = await response.json()
-                this.idToken = data.id_token
-                this.refreshToken = data.refresh_token
-                apiClient.setAuthToken(this.idToken)
-                await chrome.storage.local.set({
-                    auth_id_token: this.idToken,
-                    auth_refresh_token: this.refreshToken
-                })
-            }
-        } catch (e) {
-            console.error('Token refresh failed:', e)
+        if (this._tokenRemainingMs() < TOKEN_REFRESH_MARGIN_MS) {
+            await this.refreshAccessToken().catch(() => { })
         }
+    }
+
+    /**
+     * Exchanges the refresh token for a new id token. Concurrent callers share one request. On
+     * a definitive refusal (the refresh token was revoked) the session is cleared, so the UI
+     * shows the sign-in screen instead of failing every request.
+     */
+    async refreshAccessToken() {
+        if (!this.refreshToken) return null
+        if (this._refreshing) return this._refreshing
+
+        this._refreshing = (async () => {
+            try {
+                const response = await fetch(
+                    `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_CONFIG.apiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            grant_type: 'refresh_token',
+                            refresh_token: this.refreshToken
+                        })
+                    }
+                )
+                if (response.ok) {
+                    const data = await response.json()
+                    this.idToken = data.id_token
+                    this.refreshToken = data.refresh_token || this.refreshToken
+                    apiClient.setAuthToken(this.idToken)
+                    await this._persistAuth()
+                    this._scheduleRefresh()
+                    return this.idToken
+                }
+                if (response.status === 400 || response.status === 401 || response.status === 403) {
+                    // TOKEN_EXPIRED / USER_DISABLED / USER_NOT_FOUND: nothing will make this work.
+                    console.warn('Refresh token rejected; signing out')
+                    await this.signOut()
+                    return null
+                }
+                console.error('Token refresh failed:', response.status)
+                return null
+            } catch (e) {
+                console.error('Token refresh failed:', e)
+                return null
+            } finally {
+                this._refreshing = null
+            }
+        })()
+        return this._refreshing
     }
 
     async signInAnonymously() {
@@ -317,17 +406,29 @@ class AuthService {
         this.currentUser = null
         this.idToken = null
         this.refreshToken = null
+        clearTimeout(this._refreshTimer)
+        this._refreshTimer = null
         apiClient.setAuthToken(null)
-        await chrome.storage.local.remove(['auth_user', 'auth_id_token', 'auth_refresh_token'])
+        this._applyingRemote = true
+        try {
+            await chrome.storage.local.remove(['auth_user', 'auth_id_token', 'auth_refresh_token'])
+        } finally {
+            this._applyingRemote = false
+        }
         this._notifyListeners()
     }
 
     async _persistAuth() {
-        await chrome.storage.local.set({
-            auth_user: this.currentUser,
-            auth_id_token: this.idToken,
-            auth_refresh_token: this.refreshToken
-        })
+        this._applyingRemote = true
+        try {
+            await chrome.storage.local.set({
+                auth_user: this.currentUser,
+                auth_id_token: this.idToken,
+                auth_refresh_token: this.refreshToken
+            })
+        } finally {
+            this._applyingRemote = false
+        }
     }
 
     isAuthenticated() {

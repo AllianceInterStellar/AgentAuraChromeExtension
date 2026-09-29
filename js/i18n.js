@@ -30,6 +30,7 @@ const I18n = (() => {
             'agent.stop.title': 'Stop agent',
             'agent.tabCount': '{count} tabs',
             'agent.tabCount.one': '1 tab',
+            'agent.tabGroupActive': 'Tab group active',
 
             // Empty state
             'empty.title': 'What can I do for you?',
@@ -414,7 +415,75 @@ const I18n = (() => {
             'deploy.stepDeployOpenClaw': 'Deploying OpenClaw',
             'deploy.stepConfigureGateway': 'Configuring gateway',
             'deploy.stepSetupSsl': 'Setting up SSL',
-            'deploy.stepFinalizing': 'Finalizing'
+            'deploy.stepFinalizing': 'Finalizing',
+
+            // Side panel messages added with the 3.0.3 fixes
+            'msg.copy': 'Copy',
+            'shortcuts.empty': 'No shortcuts yet',
+            'sys.authExpired': 'Your session has expired. Open Manage and sign in again.',
+            'sys.loadClawsFailed': 'Could not load instances: {msg}',
+            'sys.loopLimit': 'Stopped: {reason}.',
+            'sys.limitSteps': 'reached the limit of {max} actions for one task',
+            'sys.limitRounds': 'reached the limit of {max} model turns for one task',
+            'sys.limitTime': 'the task has been running for {minutes} minutes',
+            'sys.limitToolRetries': 'the model kept trying to use a built-in browser tool ({max} corrections sent)',
+            'sys.maxRetriesFailedAction': 'Action still fails after multiple retries: {action}',
+            'sys.invalidInterval': 'The interval must be a whole number of minutes, at least 1.',
+            'sys.taskAddFailed': 'Could not add the task: {msg}',
+            'sys.taskQueued': 'Scheduled task "{name}" is waiting for the current run to finish.',
+            'sys.taskSkippedBusy': 'Scheduled task "{name}" was skipped: the agent was still busy.',
+
+            // Service worker notifications
+            'bg.panelOpenFailed': 'Could not open the agent panel',
+            'bg.taskReadyTitle': 'Scheduled task ready',
+            'bg.taskReadyBody': 'Click to open AgentAura and run "{name}".',
+
+            // One line per action, shown in the approval card, the banner and the page indicator
+            'action.desc.click': 'Click on "{selector}"',
+            'action.desc.type': 'Type "{text}" into "{selector}"',
+            'action.desc.navigate': 'Navigate to {url}',
+            'action.desc.scroll': 'Scroll {direction}',
+            'action.desc.form_input': 'Fill "{selector}" with a value',
+            'action.desc.wait': 'Wait {duration} ms',
+            'action.desc.screenshot': 'Capture a screenshot',
+            'action.desc.read_page': 'Read the page content',
+            'action.desc.find': 'Find elements: "{selector}"',
+            'action.desc.tabs_create': 'Open a new tab {url}',
+            'action.desc.select_tab': 'Switch to tab {tabId}',
+            'action.desc.list_tabs': 'List all tabs',
+            'action.desc.new_tab': 'Open {url} in a new tab',
+            'action.desc.execute_js': 'Execute JavaScript on the page',
+            'action.desc.get_page_text': 'Get the page text',
+            'action.desc.resize_window': 'Resize the window to {width}x{height}',
+            'action.desc.zoom': 'Set zoom to {level}x',
+            'action.desc.click_ref': 'Click element [ref={ref}]',
+            'action.desc.type_ref': 'Type "{text}" into [ref={ref}]',
+            'action.desc.hover_ref': 'Hover element [ref={ref}]',
+            'action.desc.read_page_content': "Read the page's accessibility content",
+            'action.desc.cdp_click': 'Click at ({x}, {y})',
+            'action.desc.cdp_type': 'Type "{text}"',
+            'action.desc.cdp_key': 'Press {key}',
+            'action.desc.cdp_drag': 'Drag from ({startX},{startY}) to ({endX},{endY})',
+            'action.desc.read_console': 'Read console messages',
+            'action.desc.read_network': 'Read network requests',
+
+            // Manage page: errors are shown instead of swallowed
+            'auth.guestFailed': 'Guest sign-in failed',
+            'toast.authExpired': 'Your session has expired. Please sign in again.',
+            'toast.loadClawsFailed': 'Could not load instances: {msg}',
+            'toast.actionFailed': 'Action failed: {msg}',
+            'toast.remoteSaveFailed': 'Could not save the storage remote: {msg}',
+            'toast.remoteDeleteFailed': 'Could not delete the storage remote: {msg}',
+            'ui.confirmForceDelete': 'Deleting "{name}" failed: {msg}\n\nForce-delete it? The server will drop its record even if the provider clean-up fails.',
+            'ui.loading': 'Loading...',
+            'ui.edit': 'Edit',
+            'ui.toggleVisibility': 'Show or hide the value',
+            'ui.close': 'Close',
+            'storage.editRemote': 'Edit Storage Remote',
+            'storage.optionalSuffix': '(optional)',
+            'storage.enterField': 'Enter {field}',
+            'storage.active': 'Active',
+            'storage.syncNow': 'Sync Now'
         },
         zh: {
             // Sidepanel tabs
@@ -446,6 +515,7 @@ const I18n = (() => {
             'agent.stop.title': '停止智能体',
             'agent.tabCount': '{count} 个标签页',
             'agent.tabCount.one': '1 个标签页',
+            'agent.tabGroupActive': '标签页组已启用',
 
             // Empty state
             'empty.title': '你需要我做什么？',
@@ -617,6 +687,8 @@ const I18n = (() => {
             'auth.signingIn': '登录中...',
             'auth.creatingAccount': '创建账户中...',
             'auth.createAccount': '创建账户',
+            'auth.linkGoogle': '绑定 Google 账户',
+            'auth.linkingGoogle': '正在连接 Google...',
 
             // Header
             'header.openAgent': '打开智能体面板',
@@ -693,6 +765,8 @@ const I18n = (() => {
             'account.loading': '加载中...',
             'account.guest': '👤 游客账户',
             'account.signedIn': '✓ 已登录',
+            'account.googleLinked': '✓ 已绑定 Google',
+            'account.anonymousSession': '匿名会话',
             'account.version': 'AgentAura 浏览器扩展 v{version}',
             'app.versionBadge': 'v{version}',
 
@@ -733,6 +807,7 @@ const I18n = (() => {
             'storage.pickClawTitle': '选择执行同步的实例',
             'toast.enterEmailPassword': '请输入邮箱和密码',
             'toast.passwordMinLength': '密码至少6个字符',
+            'toast.googleLinked': 'Google 账户已绑定。',
             'toast.storageUnmounted': '存储已卸载。',
             'toast.storageUnmountFailed': '卸载存储失败！',
             'toast.enterTokenFirst': '请先输入 Token！',
@@ -825,7 +900,75 @@ const I18n = (() => {
             'deploy.stepDeployOpenClaw': '部署 OpenClaw',
             'deploy.stepConfigureGateway': '配置网关',
             'deploy.stepSetupSsl': '配置 SSL',
-            'deploy.stepFinalizing': '收尾中'
+            'deploy.stepFinalizing': '收尾中',
+
+            // 3.0.3 修复新增的侧边栏文案
+            'msg.copy': '复制',
+            'shortcuts.empty': '还没有快捷方式',
+            'sys.authExpired': '登录已过期，请在"管理"页重新登录。',
+            'sys.loadClawsFailed': '无法加载实例列表：{msg}',
+            'sys.loopLimit': '已停止：{reason}。',
+            'sys.limitSteps': '单个任务已达到 {max} 个操作的上限',
+            'sys.limitRounds': '单个任务已达到 {max} 轮模型调用的上限',
+            'sys.limitTime': '任务已运行 {minutes} 分钟',
+            'sys.limitToolRetries': '模型持续尝试使用内置浏览器工具（已纠正 {max} 次）',
+            'sys.maxRetriesFailedAction': '操作多次重试后仍然失败：{action}',
+            'sys.invalidInterval': '间隔必须是不小于 1 的整数分钟。',
+            'sys.taskAddFailed': '无法添加任务：{msg}',
+            'sys.taskQueued': '定时任务"{name}"正在等待当前运行结束。',
+            'sys.taskSkippedBusy': '定时任务"{name}"已跳过：智能体仍在忙。',
+
+            // Service worker 通知
+            'bg.panelOpenFailed': '无法打开智能体面板',
+            'bg.taskReadyTitle': '定时任务已就绪',
+            'bg.taskReadyBody': '点击打开 AgentAura 并运行"{name}"。',
+
+            // 每种操作一行描述，用于审批卡、横幅和页面指示器
+            'action.desc.click': '点击 "{selector}"',
+            'action.desc.type': '在 "{selector}" 中输入 "{text}"',
+            'action.desc.navigate': '跳转到 {url}',
+            'action.desc.scroll': '向{direction}滚动',
+            'action.desc.form_input': '填写 "{selector}"',
+            'action.desc.wait': '等待 {duration} 毫秒',
+            'action.desc.screenshot': '截取屏幕截图',
+            'action.desc.read_page': '读取页面内容',
+            'action.desc.find': '查找元素："{selector}"',
+            'action.desc.tabs_create': '打开新标签页 {url}',
+            'action.desc.select_tab': '切换到标签页 {tabId}',
+            'action.desc.list_tabs': '列出所有标签页',
+            'action.desc.new_tab': '在新标签页打开 {url}',
+            'action.desc.execute_js': '在页面上执行 JavaScript',
+            'action.desc.get_page_text': '获取页面文本',
+            'action.desc.resize_window': '将窗口调整为 {width}x{height}',
+            'action.desc.zoom': '缩放至 {level} 倍',
+            'action.desc.click_ref': '点击元素 [ref={ref}]',
+            'action.desc.type_ref': '在 [ref={ref}] 中输入 "{text}"',
+            'action.desc.hover_ref': '悬停元素 [ref={ref}]',
+            'action.desc.read_page_content': '读取页面的无障碍内容',
+            'action.desc.cdp_click': '点击坐标 ({x}, {y})',
+            'action.desc.cdp_type': '输入 "{text}"',
+            'action.desc.cdp_key': '按下 {key}',
+            'action.desc.cdp_drag': '从 ({startX},{startY}) 拖动到 ({endX},{endY})',
+            'action.desc.read_console': '读取控制台消息',
+            'action.desc.read_network': '读取网络请求',
+
+            // 管理页：错误会显示出来而不是被吞掉
+            'auth.guestFailed': '访客登录失败',
+            'toast.authExpired': '登录已过期，请重新登录。',
+            'toast.loadClawsFailed': '无法加载实例列表：{msg}',
+            'toast.actionFailed': '操作失败：{msg}',
+            'toast.remoteSaveFailed': '无法保存存储远端：{msg}',
+            'toast.remoteDeleteFailed': '无法删除存储远端：{msg}',
+            'ui.confirmForceDelete': '删除"{name}"失败：{msg}\n\n要强制删除吗？即使云厂商侧清理失败，服务器也会移除这条记录。',
+            'ui.loading': '加载中...',
+            'ui.edit': '编辑',
+            'ui.toggleVisibility': '显示或隐藏该值',
+            'ui.close': '关闭',
+            'storage.editRemote': '编辑存储远端',
+            'storage.optionalSuffix': '（可选）',
+            'storage.enterField': '请输入{field}',
+            'storage.active': '已启用',
+            'storage.syncNow': '立即同步'
         }
     }
 
@@ -1118,20 +1261,26 @@ const I18n = (() => {
         translations[lang] = { ...translations[lang], ...overrides }
     })
 
+    /**
+     * Only English and Simplified Chinese have a complete table. The other twelve start as a
+     * copy of English and get the navigation and key notices from localizedOverrides, so their
+     * labels say so; the language menus in popup.html and pages/options.html repeat these
+     * labels verbatim and must be kept in step.
+     */
     const languageLabels = {
-        ar: 'عربي',
-        de: 'Deutsch',
+        ar: 'عربي (partial)',
+        de: 'Deutsch (partial)',
         en: 'English',
-        es: 'Español (Spain)',
-        'es-419': 'Español (LA)',
-        fr: 'Français',
-        it: 'Italiano',
-        ja: '日本語',
-        ko: '한국어',
-        pl: 'Polski',
-        'pt-BR': 'Português (Brasil)',
-        ru: 'Русский',
-        tr: 'Türkçe',
+        es: 'Español (Spain) (partial)',
+        'es-419': 'Español (LA) (partial)',
+        fr: 'Français (partial)',
+        it: 'Italiano (partial)',
+        ja: '日本語 (partial)',
+        ko: '한국어 (partial)',
+        pl: 'Polski (partial)',
+        'pt-BR': 'Português (Brasil) (partial)',
+        ru: 'Русский (partial)',
+        tr: 'Türkçe (partial)',
         zh: '简体中文'
     }
 
@@ -1211,22 +1360,23 @@ const I18n = (() => {
     }
 
     function getAvailableLanguages() {
-        return [
-            { code: 'ar', label: languageLabels.ar },
-            { code: 'de', label: languageLabels.de },
-            { code: 'en', label: languageLabels.en },
-            { code: 'es', label: languageLabels.es },
-            { code: 'es-419', label: languageLabels['es-419'] },
-            { code: 'fr', label: languageLabels.fr },
-            { code: 'it', label: languageLabels.it },
-            { code: 'ja', label: languageLabels.ja },
-            { code: 'ko', label: languageLabels.ko },
-            { code: 'pl', label: languageLabels.pl },
-            { code: 'pt-BR', label: languageLabels['pt-BR'] },
-            { code: 'ru', label: languageLabels.ru },
-            { code: 'tr', label: languageLabels.tr },
-            { code: 'zh', label: languageLabels.zh }
-        ]
+        return Object.keys(languageLabels).map((code) => ({ code, label: languageLabels[code] }))
+    }
+
+    /**
+     * How much of the UI each language actually translates: `total` is the number of English
+     * keys, `translated` the number whose value differs from the English one. English is the
+     * source and counts as fully translated.
+     */
+    function getLanguageCoverage() {
+        const englishKeys = Object.keys(translations.en)
+        return Object.keys(languageLabels).map((code) => {
+            const table = translations[code] || {}
+            const translated = code === 'en'
+                ? englishKeys.length
+                : englishKeys.filter((key) => key in table && table[key] !== translations.en[key]).length
+            return { code, total: englishKeys.length, translated }
+        })
     }
 
     /**
@@ -1244,6 +1394,8 @@ const I18n = (() => {
 
     function applyToPage() {
         const ambient = ambientParams()
+        document.documentElement.lang = currentLang
+        document.documentElement.dir = currentLang === 'ar' ? 'rtl' : 'ltr'
         document.querySelectorAll('[data-i18n]').forEach((el) => {
             const key = el.getAttribute('data-i18n')
             el.textContent = t(key, ambient)
@@ -1256,13 +1408,17 @@ const I18n = (() => {
             const key = el.getAttribute('data-i18n-title')
             el.title = t(key, ambient)
         })
+        document.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
+            const key = el.getAttribute('data-i18n-aria-label')
+            el.setAttribute('aria-label', t(key, ambient))
+        })
         document.querySelectorAll('[data-i18n-prompt]').forEach((el) => {
             const key = el.getAttribute('data-i18n-prompt')
             el.setAttribute('data-prompt', t(key))
         })
     }
 
-    return { init, t, setLang, getLang, getAvailableLanguages, applyToPage, detectLanguage }
+    return { init, t, setLang, getLang, getAvailableLanguages, getLanguageCoverage, applyToPage, detectLanguage }
 })()
 
 if (typeof module !== 'undefined' && module.exports) {

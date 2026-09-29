@@ -1,4 +1,5 @@
 const MORE_AGENTS_URL = 'https://allianceinterstellar.com/pricing#agentaura-plans'
+// GATEWAY_DOMAIN is defined in chat.js, which every page that loads app.js loads first.
 
 const PROVIDERS = [
     { id: 'hetzner', name: 'Hetzner', icon: '🟠' },
@@ -116,14 +117,15 @@ const STORAGE_TYPES = [
     }
 ]
 
+// Colours live in css/styles.css (.status-badge.<status>); only the label and the pulse are needed here.
 function getStatusConfig() {
     return {
-        running: { color: '#4CAF50', bgColor: 'rgba(76,175,80,0.1)', label: I18n.t('ui.running'), pulse: true },
-        configuring: { color: '#FF9800', bgColor: 'rgba(255,152,0,0.1)', label: I18n.t('ui.configuring'), pulse: true },
-        starting: { color: '#FF9800', bgColor: 'rgba(255,152,0,0.1)', label: I18n.t('ui.starting'), pulse: true },
-        stopped: { color: '#8E8E93', bgColor: 'rgba(142,142,147,0.1)', label: I18n.t('ui.stopped'), pulse: false },
-        error: { color: '#EF5350', bgColor: 'rgba(239,83,80,0.1)', label: I18n.t('ui.error'), pulse: false },
-        unknown: { color: '#8E8E93', bgColor: 'rgba(142,142,147,0.1)', label: I18n.t('ui.unknown'), pulse: false }
+        running: { label: I18n.t('ui.running'), pulse: true },
+        configuring: { label: I18n.t('ui.configuring'), pulse: true },
+        starting: { label: I18n.t('ui.starting'), pulse: true },
+        stopped: { label: I18n.t('ui.stopped'), pulse: false },
+        error: { label: I18n.t('ui.error'), pulse: false },
+        unknown: { label: I18n.t('ui.unknown'), pulse: false }
     }
 }
 
@@ -138,6 +140,18 @@ function getProvisionSteps() {
         I18n.t('deploy.stepSetupSsl'),
         I18n.t('deploy.stepFinalizing')
     ]
+}
+
+// The server names its steps in English. Matching used to be done against the first word of
+// the translated label, so in any language but English no step ever lit up.
+const PROVISION_STEP_KEYWORDS = [
+    /creat/, /wait/, /ssh|connect/, /depend|install/, /deploy/, /gateway|configur/, /ssl|cert/, /final/
+]
+
+function provisionStepIndex(step) {
+    const s = String(step || '').toLowerCase()
+    if (!s) return -1
+    return PROVISION_STEP_KEYWORDS.findIndex(re => re.test(s))
 }
 
 const AI_PROVIDERS = [
@@ -187,30 +201,25 @@ let isDeploying = false
 let currentDeployClawId = null
 let storageRemotes = []
 let editingRemoteId = null
-let mountingClawId = null
 let clawModelAssignments = {}
 let syncingClawIds = {}
+
+/** True when this page is the "Manage" iframe inside the side panel, false when opened on its own. */
+const IS_EMBEDDED = window.parent !== window
 
 document.addEventListener('DOMContentLoaded', async () => {
     await I18n.init()
     I18n.applyToPage()
+    document.documentElement.lang = I18n.getLang()
 
     const popupLangSelect = document.getElementById('popup-language-select')
     if (popupLangSelect) {
         popupLangSelect.value = I18n.getLang()
         popupLangSelect.addEventListener('change', async () => {
             I18n.setLang(popupLangSelect.value)
+            document.documentElement.lang = I18n.getLang()
             await refreshLocalizedUI()
         })
-    }
-
-    const hasSession = await ensureAuthenticatedSession()
-
-    if (hasSession) {
-        showMainApp()
-        loadClaws()
-    } else {
-        showAuthScreen()
     }
 
     setupEventListeners()
@@ -222,6 +231,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupStoragePage()
     setupChatEventListeners()
     loadClawModelAssignments()
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) pauseProvisionPolling()
+        else resumeProvisionPolling()
+    })
+
+    const hasSession = await ensureAuthenticatedSession()
+    if (hasSession) {
+        showMainApp()
+        loadClaws()
+    } else {
+        showAuthScreen()
+    }
+
+    // Sign-in, refresh and sign-out done in another context (the side panel, another tab)
+    // arrive through storage; follow them instead of holding on to a different user.
+    let lastUid = authService.currentUser?.uid || null
+    authService.onAuthStateChanged((user) => {
+        const uid = user?.uid || null
+        if (uid === lastUid) return
+        lastUid = uid
+        if (user && authService.idToken) {
+            showMainApp()
+            loadClaws()
+        } else {
+            stopAllProvisionPolling()
+            showAuthScreen()
+        }
+    })
 })
 
 async function refreshLocalizedUI() {
@@ -256,11 +294,18 @@ async function ensureAuthenticatedSession() {
         return true
     }
 
+    // Embedded in the side panel, the panel owns the anonymous sign-in. Doing it here as well
+    // raced it and created two Firebase users, one per frame. The listener registered at
+    // start-up picks the session up once the panel has stored it.
+    if (IS_EMBEDDED) {
+        return false
+    }
+
     try {
         await authService.signInAnonymously()
         return true
     } catch (e) {
-        showAuthError(e.message || 'Anonymous sign-in failed')
+        showAuthError(e.message || I18n.t('auth.guestFailed'))
         return false
     }
 }
@@ -272,8 +317,8 @@ function setupEventListeners() {
     document.getElementById('btn-link-google').addEventListener('click', handleLinkGoogle)
     document.getElementById('btn-refresh').addEventListener('click', loadClaws)
     document.getElementById('btn-open-agent').addEventListener('click', () => {
-        if (window.parent !== window) {
-            window.parent.postMessage({ type: 'SWITCH_TO_CHAT' }, '*')
+        if (IS_EMBEDDED) {
+            window.parent.postMessage({ type: 'SWITCH_TO_CHAT' }, location.origin)
         } else {
             chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' })
         }
@@ -340,6 +385,9 @@ function setupEventListeners() {
             case 'pick-claw-model':
                 toggleClawModelPicker(el.dataset.clawId)
                 break
+            case 'select-claw-model':
+                handleClawModelPick(el)
+                break
             case 'sync-claw-ai':
                 syncClawAIConfig(el.dataset.clawId)
                 break
@@ -390,7 +438,7 @@ async function handleSignIn() {
         await authService.signInWithEmail(email, password)
         showMainApp()
         loadClaws()
-        if (window.parent !== window) window.parent.postMessage({ type: 'AUTH_CHANGED' }, '*')
+        if (IS_EMBEDDED) window.parent.postMessage({ type: 'AUTH_CHANGED' }, location.origin)
     } catch (e) {
         showAuthError(e.message)
     } finally {
@@ -417,7 +465,7 @@ async function handleSignUp() {
         await authService.signUpWithEmail(email, password)
         showMainApp()
         loadClaws()
-        if (window.parent !== window) window.parent.postMessage({ type: 'AUTH_CHANGED' }, '*')
+        if (IS_EMBEDDED) window.parent.postMessage({ type: 'AUTH_CHANGED' }, location.origin)
     } catch (e) {
         showAuthError(e.message)
     } finally {
@@ -433,7 +481,7 @@ async function handleGuestSignIn() {
         await authService.signInAnonymously()
         showMainApp()
         loadClaws()
-        if (window.parent !== window) window.parent.postMessage({ type: 'AUTH_CHANGED' }, '*')
+        if (IS_EMBEDDED) window.parent.postMessage({ type: 'AUTH_CHANGED' }, location.origin)
     } catch (e) {
         showAuthError(e.message)
     } finally {
@@ -451,7 +499,7 @@ async function handleLinkGoogle() {
         await authService.linkWithGoogle()
         updateAccountPage()
         showToast(I18n.t('toast.googleLinked'), 'success')
-        if (window.parent !== window) window.parent.postMessage({ type: 'AUTH_CHANGED' }, '*')
+        if (IS_EMBEDDED) window.parent.postMessage({ type: 'AUTH_CHANGED' }, location.origin)
     } catch (e) {
         showToast(e.message, 'error')
     } finally {
@@ -462,17 +510,11 @@ async function handleLinkGoogle() {
 
 async function handleSignOut() {
     await authService.signOut()
-    Object.values(provisionTimers).forEach(clearInterval)
-    provisionTimers = {}
-
-    if (await ensureAuthenticatedSession()) {
-        showMainApp()
-        loadClaws()
-        if (window.parent !== window) window.parent.postMessage({ type: 'AUTH_CHANGED' }, '*')
-        return
-    }
-
+    stopAllProvisionPolling()
+    // Straight to the sign-in screen. Signing in anonymously again right away made the email
+    // form unreachable and left an orphan guest account behind on every sign-out.
     showAuthScreen()
+    if (IS_EMBEDDED) window.parent.postMessage({ type: 'AUTH_CHANGED' }, location.origin)
 }
 
 function showAuthError(msg) {
@@ -485,46 +527,77 @@ function hideAuthError() {
     document.getElementById('auth-error').classList.add('hidden')
 }
 
+let clawsRequestSeq = 0
+
 async function loadClaws() {
     const loading = document.getElementById('claws-loading')
     const empty = document.getElementById('claws-empty')
     const error = document.getElementById('claws-error')
     const list = document.getElementById('claws-list')
 
-    loading.classList.remove('hidden')
-    empty.classList.add('hidden')
+    // Responses can arrive out of order when refreshes overlap; only the newest one counts.
+    const seq = ++clawsRequestSeq
+    // The old list stays on screen while the new one loads. Clearing it first made every
+    // refresh flash a spinner, close any open model picker and lose the scroll position.
+    if (!clawsList.length) loading.classList.remove('hidden')
     error.classList.add('hidden')
-    list.innerHTML = ''
 
     try {
-        clawsList = await apiClient.getClaws()
+        const claws = await apiClient.getClaws()
+        if (seq !== clawsRequestSeq) return
+        clawsList = claws
         loading.classList.add('hidden')
 
         if (clawsList.length === 0) {
+            list.innerHTML = ''
             empty.classList.remove('hidden')
         } else {
+            empty.classList.add('hidden')
             renderClawsList(clawsList)
+            const stillProvisioning = new Set()
             clawsList.forEach(claw => {
                 const status = (claw.status || '').toLowerCase()
                 if (status === 'configuring' || status === 'starting' || status === 'initializing') {
+                    stillProvisioning.add(claw.id)
                     startProvisionPolling(claw.id)
                 }
             })
+            Object.keys(provisionTimers).forEach(id => {
+                if (!stillProvisioning.has(id) && id !== currentDeployClawId) stopProvisionPolling(id)
+            })
         }
     } catch (e) {
+        if (seq !== clawsRequestSeq) return
         loading.classList.add('hidden')
-        error.classList.remove('hidden')
-        document.getElementById('claws-error-msg').textContent = e.message
+        if (isAuthExpired(e)) {
+            showToast(I18n.t('toast.authExpired'), 'error', 5000)
+            showAuthScreen()
+            return
+        }
+        // Only when there is nothing better to show; a transient failure should not replace a
+        // list the user can still see.
+        if (!clawsList.length) {
+            list.innerHTML = ''
+            empty.classList.add('hidden')
+            error.classList.remove('hidden')
+            document.getElementById('claws-error-msg').textContent = e.message
+        } else {
+            showToast(I18n.t('toast.loadClawsFailed', { msg: e.message }), 'error')
+        }
     }
 }
+
+const CLAW_CARD_ACTIONS = ['start', 'stop', 'restart', 'delete', 'chat', 'gateway', 'mount-storage', 'unmount-storage']
 
 function renderClawsList(claws) {
     const list = document.getElementById('claws-list')
     list.innerHTML = claws.map(claw => createClawCard(claw)).join('')
+    bindClawCardActions(list)
+}
 
-    const clawActions = ['start', 'stop', 'restart', 'delete', 'chat', 'gateway', 'mount-storage', 'unmount-storage']
-    list.querySelectorAll('[data-action]').forEach(btn => {
-        if (clawActions.includes(btn.dataset.action)) {
+function bindClawCardActions(root) {
+    root.querySelectorAll('[data-action]').forEach(btn => {
+        if (CLAW_CARD_ACTIONS.includes(btn.dataset.action)) {
             btn.addEventListener('click', handleClawAction)
         }
     })
@@ -535,9 +608,10 @@ function createClawCard(claw) {
     const statusConfig = getStatusConfig()
     const config = statusConfig[status] || statusConfig.unknown
     const specs = parsePlanSpecs(claw.planId || '')
-    const cpu = claw.cpu || specs.cpu || 0
-    const memory = claw.memory || specs.memory || 0
-    const storage = claw.storage || specs.storage || 0
+    // Server fields go straight into markup below; they are numbers or they are nothing.
+    const cpu = toNumber(claw.cpu, 0) || specs.cpu || 0
+    const memory = toNumber(claw.memory, 0) || specs.memory || 0
+    const storage = toNumber(claw.storage, 0) || specs.storage || 0
     const ip = claw.ip || claw.ipAddress || ''
     const provider = claw.provider || 'hetzner'
     const providerLabel = PROVIDERS.find(p => p.id === provider)?.name || provider
@@ -642,7 +716,10 @@ async function handleClawAction(e) {
     const clawId = btn.dataset.clawId
 
     btn.disabled = true
+    let refresh = true
 
+    // The API methods throw on failure now, so a 401 or a 500 lands in the catch below instead
+    // of being followed by a success toast.
     try {
         switch (action) {
             case 'start':
@@ -658,10 +735,20 @@ async function handleClawAction(e) {
                 showToast(I18n.t('toast.instanceRestarting'), 'success')
                 break
             case 'delete':
-                if (confirm(I18n.t('ui.confirmDeleteInstance', { name: btn.dataset.clawName }))) {
-                    await apiClient.deleteClaw(clawId)
-                    showToast(I18n.t('toast.instanceDeleted'), 'success')
+                if (!confirm(I18n.t('ui.confirmDeleteInstance', { name: btn.dataset.clawName }))) {
+                    refresh = false
+                    break
                 }
+                try {
+                    await apiClient.deleteClaw(clawId)
+                } catch (err) {
+                    // A forced delete skips the provider clean-up. It is the user's call, made
+                    // knowingly, never an automatic fallback.
+                    if (isAuthExpired(err)) throw err
+                    if (!confirm(I18n.t('ui.confirmForceDelete', { name: btn.dataset.clawName, msg: err.message }))) throw err
+                    await apiClient.deleteClaw(clawId, { force: true })
+                }
+                showToast(I18n.t('toast.instanceDeleted'), 'success')
                 break
             case 'chat':
                 openClawChat(clawId)
@@ -669,65 +756,80 @@ async function handleClawAction(e) {
             case 'gateway': {
                 const subdomain = btn.dataset.subdomain
                 if (subdomain) {
-                    window.open(`https://${subdomain}.digitalenginecore.com`, '_blank')
+                    window.open(gatewayUrlFor(subdomain), '_blank', 'noopener')
                 }
+                refresh = false
                 break
             }
             case 'mount-storage':
-                await handleMountStorage(clawId, btn)
+                refresh = await handleMountStorage(clawId, btn)
                 break
             case 'unmount-storage':
-                if (confirm(I18n.t('ui.confirmUnmountStorage', { name: btn.dataset.clawName }))) {
-                    btn.disabled = true
-                    btn.innerHTML = '<div class="spinner" style="width:12px;height:12px;border-width:2px"></div> ' + I18n.t('ui.unmounting')
-                    const result = await apiClient.unmountClawStorage(clawId)
-                    if (result) {
-                        showToast(I18n.t('toast.storageUnmounted'), 'success')
-                    } else {
-                        showToast(I18n.t('toast.storageUnmountFailed'), 'error')
-                    }
+                if (!confirm(I18n.t('ui.confirmUnmountStorage', { name: btn.dataset.clawName }))) {
+                    refresh = false
+                    break
                 }
+                btn.innerHTML = '<div class="spinner" style="width:12px;height:12px;border-width:2px"></div> ' + escapeHtml(I18n.t('ui.unmounting'))
+                await apiClient.unmountClawStorage(clawId)
+                showToast(I18n.t('toast.storageUnmounted'), 'success')
                 break
         }
-        setTimeout(loadClaws, 1000)
+        if (refresh) setTimeout(loadClaws, 1000)
     } catch (e) {
-        showToast(e.message, 'error')
+        if (isAuthExpired(e)) {
+            showToast(I18n.t('toast.authExpired'), 'error', 5000)
+            showAuthScreen()
+        } else {
+            showToast(I18n.t('toast.actionFailed', { msg: e.message }), 'error')
+        }
+        setTimeout(loadClaws, 500)
     } finally {
         btn.disabled = false
     }
 }
 
+function gatewayUrlFor(subdomain) {
+    return `https://${subdomain}.${GATEWAY_DOMAIN}`
+}
+
 function renderProviderGrid() {
     const grid = document.getElementById('provider-grid')
+    grid.setAttribute('role', 'radiogroup')
     grid.innerHTML = PROVIDERS.map(p => `
-        <div class="provider-card ${selectedProvider === p.id ? 'selected' : ''}" data-provider="${p.id}">
-            <span style="font-size: 24px">${p.icon}</span>
+        <div class="provider-card ${selectedProvider === p.id ? 'selected' : ''}" data-provider="${p.id}" role="radio" aria-checked="${selectedProvider === p.id ? 'true' : 'false'}" tabindex="0">
+            <span style="font-size: 24px" aria-hidden="true">${p.icon}</span>
             <span>${p.name}</span>
         </div>
     `).join('')
 
     grid.querySelectorAll('.provider-card').forEach(card => {
         card.addEventListener('click', () => selectProvider(card.dataset.provider))
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectProvider(card.dataset.provider) }
+        })
     })
 }
 
 function renderAIProviderGrid() {
     const grid = document.getElementById('ai-provider-grid')
     if (!grid) return
-    const icons = { claude: '🟤', openai: '🟢', gemini: '🔵', other: '⚡' }
     grid.innerHTML = AI_PROVIDERS.map(p => `
-        <div class="provider-card ${selectedAIProvider === p.id ? 'selected' : ''}" data-ai-provider="${p.id}">
-            <span style="font-size: 24px">${icons[p.id] || '🤖'}</span>
+        <div class="provider-card ${selectedAIProvider === p.id ? 'selected' : ''}" data-ai-provider="${p.id}" role="radio" aria-checked="${selectedAIProvider === p.id ? 'true' : 'false'}" tabindex="0">
+            <span style="font-size: 24px">${AI_PROVIDER_ICONS[p.id] || '🤖'}</span>
             <span>${p.name}</span>
             <span style="font-size: 9px; color: var(--text-muted)">${p.company}</span>
         </div>
     `).join('')
 
     grid.querySelectorAll('.provider-card').forEach(card => {
-        card.addEventListener('click', () => {
+        const pick = () => {
             selectedAIProvider = card.dataset.aiProvider
             renderAIProviderGrid()
             renderAIModelSelect()
+        }
+        card.addEventListener('click', pick)
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick() }
         })
     })
 }
@@ -756,13 +858,17 @@ async function selectProvider(providerId) {
 
     plansLoading.classList.remove('hidden')
     plansList.innerHTML = ''
-    regionSelect.innerHTML = '<option value="">Loading...</option>'
+    regionSelect.innerHTML = `<option value="">${escapeHtml(I18n.t('ui.loading'))}</option>`
 
     try {
         const [plansData, regions] = await Promise.all([
-            apiClient.getProviderPlans(providerId),
-            apiClient.getProviderRegions(providerId)
+            apiClient.getProviderPlans(providerId).catch(() => null),
+            apiClient.getProviderRegions(providerId).catch(() => [])
         ])
+
+        // The user may have clicked another provider while these loaded; its own request
+        // will render, this one must not overwrite it.
+        if (selectedProvider !== providerId) return
 
         plansLoading.classList.add('hidden')
 
@@ -780,6 +886,7 @@ async function selectProvider(providerId) {
             renderDefaultRegions(providerId, regionSelect)
         }
     } catch (e) {
+        if (selectedProvider !== providerId) return
         plansLoading.classList.add('hidden')
         renderDefaultPlans(providerId)
         renderDefaultRegions(providerId, regionSelect)
@@ -788,21 +895,31 @@ async function selectProvider(providerId) {
 
 function renderPlans(plans) {
     const plansList = document.getElementById('plans-list')
+    const spec = (v) => Number.isFinite(toNumber(v, NaN)) ? toNumber(v) : '?'
     plansList.innerHTML = plans.map(plan => `
-        <div class="plan-card ${selectedPlan === plan.id ? 'selected' : ''}" data-plan-id="${escapeHtml(plan.id)}">
+        <div class="plan-card ${selectedPlan === plan.id ? 'selected' : ''}" data-plan-id="${escapeHtml(plan.id)}" role="radio" aria-checked="${selectedPlan === plan.id ? 'true' : 'false'}" tabindex="0">
             <div class="plan-card-info">
                 <span class="plan-card-name">${escapeHtml(plan.name || plan.id)}</span>
-                <span class="plan-card-specs">${plan.cpu || '?'} vCPU · ${plan.memory || '?'} GB RAM · ${plan.storage || plan.disk || '?'} GB SSD</span>
+                <span class="plan-card-specs">${spec(plan.cpu)} vCPU · ${spec(plan.memory)} GB RAM · ${spec(plan.storage ?? plan.disk)} GB SSD</span>
             </div>
         </div>
     `).join('')
 
+    plansList.setAttribute('role', 'radiogroup')
     plansList.querySelectorAll('.plan-card').forEach(card => {
-        card.addEventListener('click', () => {
+        const pick = () => {
             selectedPlan = card.dataset.planId
-            plansList.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'))
+            plansList.querySelectorAll('.plan-card').forEach(c => {
+                c.classList.remove('selected')
+                c.setAttribute('aria-checked', 'false')
+            })
             card.classList.add('selected')
+            card.setAttribute('aria-checked', 'true')
             updateDeployButton()
+        }
+        card.addEventListener('click', pick)
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick() }
         })
     })
 }
@@ -950,68 +1067,119 @@ function openMoreAgentsPage() {
     chrome.tabs.create({ url: MORE_AGENTS_URL })
 }
 
+const PROVISION_POLL_MS = 3000
+const PROVISION_MAX_FAILURES = 10
+const PROVISION_MAX_DURATION_MS = 45 * 60 * 1000
+let provisionPollingPaused = false
+
+/**
+ * Polls one claw's provisioning progress until it completes, fails, keeps failing, or has
+ * been going for longer than any deployment should. One chained timeout per claw, so a slow
+ * answer never stacks requests, and paused while the page is hidden.
+ */
 function startProvisionPolling(clawId, isDeployPage = false) {
     if (provisionTimers[clawId]) return
 
-    provisionTimers[clawId] = setInterval(async () => {
-        try {
-            const progress = await apiClient.getProvisionProgress(clawId)
-            if (!progress) return
+    const state = { failures: 0, startedAt: Date.now(), isDeployPage, timer: null, stopped: false }
+    provisionTimers[clawId] = state
 
-            const percent = progress.percentComplete || 0
-            const currentStep = progress.currentStep || ''
-            const logs = Array.isArray(progress.logEntries) ? progress.logEntries : []
-            const completed = progress.isComplete || false
-            const failed = progress.isFailed || false
+    const schedule = () => {
+        if (state.stopped) return
+        state.timer = setTimeout(tick, PROVISION_POLL_MS)
+    }
 
-            if (isDeployPage && currentDeployClawId === clawId) {
-                updateProvisionUI(percent, currentStep, logs, completed, failed)
-            }
-
-            const provisionEl = document.getElementById(`provision-${clawId}`)
-            if (provisionEl) {
-                if (!completed && !failed) {
-                    provisionEl.classList.remove('hidden')
-                    provisionEl.innerHTML = `
-                        <div class="progress-bar-container mt-2">
-                            <div class="progress-bar ${completed ? 'success' : ''}" style="width: ${percent}%"></div>
-                        </div>
-                        <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px">${escapeHtml(currentStep)} (${percent}%)</div>
-                    `
-                } else {
-                    provisionEl.classList.add('hidden')
-                }
-            }
-
-            if (completed || failed) {
-                clearInterval(provisionTimers[clawId])
-                delete provisionTimers[clawId]
-
-                if (isDeployPage && currentDeployClawId === clawId) {
-                    isDeploying = false
-                    document.getElementById('btn-cancel-deploy').classList.add('hidden')
-                    document.getElementById('btn-view-claws').classList.remove('hidden')
-
-                    if (completed) {
-                        showToast(I18n.t('toast.deployComplete'), 'success')
-                    } else {
-                        showToast(I18n.t('toast.deployFailed'), 'error')
-                    }
-                }
-
-                if (completed && window.parent !== window) {
-                    window.parent.postMessage({ type: 'DEPLOY_COMPLETE' }, '*')
-                }
-
-                loadClaws()
-            }
-        } catch (e) {
-            console.error('Provision poll error:', e)
+    const tick = async () => {
+        if (state.stopped) return
+        if (provisionPollingPaused) { schedule(); return }
+        if (Date.now() - state.startedAt > PROVISION_MAX_DURATION_MS) {
+            stopProvisionPolling(clawId)
+            return
         }
-    }, 3000)
+
+        let progress = null
+        try {
+            progress = await apiClient.getProvisionProgress(clawId)
+            state.failures = 0
+        } catch (e) {
+            state.failures++
+            if (isAuthExpired(e) || e.status === 404 || state.failures >= PROVISION_MAX_FAILURES) {
+                stopProvisionPolling(clawId)
+                return
+            }
+        }
+        if (state.stopped) return
+        if (!progress) { schedule(); return }
+
+        const percent = clamp(toNumber(progress.percentComplete, 0), 0, 100)
+        const currentStep = String(progress.currentStep || '')
+        const logs = Array.isArray(progress.logEntries) ? progress.logEntries : []
+        const completed = !!progress.isComplete
+        const failed = !!progress.isFailed
+
+        if (state.isDeployPage && currentDeployClawId === clawId) {
+            updateProvisionUI(percent, currentStep, logs, completed, failed)
+        }
+
+        const provisionEl = document.getElementById(`provision-${clawId}`)
+        if (provisionEl) {
+            if (!completed && !failed) {
+                provisionEl.classList.remove('hidden')
+                provisionEl.innerHTML = `
+                    <div class="progress-bar-container mt-2">
+                        <div class="progress-bar" style="width: ${percent}%"></div>
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px">${escapeHtml(currentStep)} (${percent}%)</div>
+                `
+            } else {
+                provisionEl.classList.add('hidden')
+            }
+        }
+
+        if (completed || failed) {
+            stopProvisionPolling(clawId)
+
+            if (state.isDeployPage && currentDeployClawId === clawId) {
+                isDeploying = false
+                document.getElementById('btn-cancel-deploy').classList.add('hidden')
+                document.getElementById('btn-view-claws').classList.remove('hidden')
+                showToast(I18n.t(completed ? 'toast.deployComplete' : 'toast.deployFailed'), completed ? 'success' : 'error')
+            }
+
+            if (completed && IS_EMBEDDED) {
+                window.parent.postMessage({ type: 'DEPLOY_COMPLETE' }, location.origin)
+            }
+
+            loadClaws()
+            return
+        }
+        schedule()
+    }
+
+    schedule()
+}
+
+function stopProvisionPolling(clawId) {
+    const state = provisionTimers[clawId]
+    if (!state) return
+    state.stopped = true
+    clearTimeout(state.timer)
+    delete provisionTimers[clawId]
+}
+
+function stopAllProvisionPolling() {
+    Object.keys(provisionTimers).forEach(stopProvisionPolling)
+}
+
+function pauseProvisionPolling() {
+    provisionPollingPaused = true
+}
+
+function resumeProvisionPolling() {
+    provisionPollingPaused = false
 }
 
 function updateProvisionUI(percent, step, logs, completed = false, failed = false) {
+    percent = clamp(toNumber(percent, 0), 0, 100)
     document.getElementById('progress-percent').textContent = `${percent}%`
     document.getElementById('progress-bar').style.width = `${percent}%`
 
@@ -1026,9 +1194,7 @@ function updateProvisionUI(percent, step, logs, completed = false, failed = fals
 
     const stepsEl = document.getElementById('progress-steps')
     const provisionSteps = getProvisionSteps()
-    let currentStepIdx = provisionSteps.findIndex(s =>
-        step && step.toLowerCase().includes(s.toLowerCase().split(' ')[0])
-    )
+    let currentStepIdx = provisionStepIndex(step)
     if (currentStepIdx === -1) currentStepIdx = Math.floor((percent / 100) * provisionSteps.length)
 
     stepsEl.innerHTML = provisionSteps.map((s, i) => {
@@ -1051,7 +1217,7 @@ function updateProvisionUI(percent, step, logs, completed = false, failed = fals
         const logsEl = document.getElementById('progress-logs')
         logsEl.classList.remove('hidden')
         logsEl.innerHTML = logs.map(l => {
-            const level = (l.level || 'info').toLowerCase()
+            const level = cssToken(l.level, 'info')
             const msg = l.message || l.msg || ''
             return `<div class="log-entry ${level}">${escapeHtml(msg)}</div>`
         }).join('')
@@ -1061,13 +1227,12 @@ function updateProvisionUI(percent, step, logs, completed = false, failed = fals
 
 function handleCancelDeploy() {
     if (currentDeployClawId) {
-        apiClient.deleteClaw(currentDeployClawId).then(() => {
-            showToast(I18n.t('toast.deployCancelled'), 'info')
-        })
-        if (provisionTimers[currentDeployClawId]) {
-            clearInterval(provisionTimers[currentDeployClawId])
-            delete provisionTimers[currentDeployClawId]
-        }
+        const id = currentDeployClawId
+        apiClient.deleteClaw(id)
+            .then(() => showToast(I18n.t('toast.deployCancelled'), 'info'))
+            .catch(e => showToast(I18n.t('toast.actionFailed', { msg: e.message }), 'error'))
+            .finally(() => loadClaws())
+        stopProvisionPolling(id)
     }
     resetDeployForm()
 }
@@ -1177,13 +1342,12 @@ function renderConfigProviders() {
 function renderAIConfigProviders() {
     const list = document.getElementById('ai-config-list')
     if (!list) return
-    const icons = { claude: '🟤', openai: '🟢', gemini: '🔵', other: '⚡' }
 
     list.innerHTML = AI_PROVIDERS.map(provider => `
         <div class="config-provider-card">
             <div class="config-provider-header" data-config-provider="ai-${provider.id}">
                 <div class="config-provider-left">
-                    <span style="font-size: 18px">${icons[provider.id] || '🤖'}</span>
+                    <span style="font-size: 18px">${AI_PROVIDER_ICONS[provider.id] || '🤖'}</span>
                     <span class="config-provider-name">${provider.name} (${provider.company})</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px">
@@ -1297,10 +1461,10 @@ async function syncProviderConfig(providerId) {
         return
     }
 
-    const result = await apiClient.syncProviderConfig(isAI ? `ai/${configKey}` : providerId, config)
-    if (result) {
+    try {
+        await apiClient.syncProviderConfig(isAI ? `ai/${configKey}` : providerId, config)
         showToast(I18n.t('toast.configSynced'), 'success')
-    } else {
+    } catch (e) {
         showToast(I18n.t('toast.syncFailed'), 'error')
     }
 }
@@ -1335,7 +1499,7 @@ function updateAccountPage() {
     const badge = document.getElementById('account-badge')
     const linkGoogle = document.getElementById('btn-link-google')
 
-    const displayName = user.displayName || user.email || 'Guest'
+    const displayName = user.displayName || user.email || I18n.t('account.guest')
     avatar.textContent = displayName.charAt(0).toUpperCase()
     name.textContent = displayName
     email.textContent = user.email || I18n.t('account.anonymousSession')
@@ -1472,20 +1636,34 @@ function buildModelPickerOptions(clawId) {
         for (const model of models) {
             const isSelected = current && current.provider === provider.id && current.model === model.id
             html += `
-                <div class="model-picker-option ${isSelected ? 'selected' : ''}" data-claw-id="${escapeHtml(clawId)}" data-provider-id="${provider.id}" data-model-id="${model.id}">
+                <div class="model-picker-option ${isSelected ? 'selected' : ''}" data-action="select-claw-model" data-claw-id="${escapeHtml(clawId)}" data-provider-id="${provider.id}" data-model-id="${model.id}" role="option" aria-selected="${isSelected ? 'true' : 'false'}" tabindex="0">
                     <div class="model-picker-option-name">${escapeHtml(model.name)}</div>
                     <div class="model-picker-option-desc">${escapeHtml(model.desc)}</div>
-                    ${isSelected ? '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="' + color + '" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>' : ''}
+                    ${isSelected ? '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="' + color + '" viewBox="0 0 256 256" aria-hidden="true"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>' : ''}
                 </div>`
         }
         html += `</div>`
     }
     if (current) {
-        html += `<div class="model-picker-option model-picker-reset" data-claw-id="${escapeHtml(clawId)}" data-provider-id="" data-model-id="">
-            <div class="model-picker-option-name" style="color: var(--text-muted)">${I18n.t('ui.resetToDefault')}</div>
+        html += `<div class="model-picker-option model-picker-reset" data-action="select-claw-model" data-claw-id="${escapeHtml(clawId)}" data-provider-id="" data-model-id="" role="option" tabindex="0">
+            <div class="model-picker-option-name" style="color: var(--text-muted)">${escapeHtml(I18n.t('ui.resetToDefault'))}</div>
         </div>`
     }
     return html
+}
+
+/** One handler through the document-level data-action delegate; nothing is bound per open. */
+async function handleClawModelPick(el) {
+    const cId = el.dataset.clawId
+    const pId = el.dataset.providerId
+    const mId = el.dataset.modelId
+    if (pId && mId) {
+        await saveClawModelAssignment(cId, pId, mId)
+    } else {
+        await removeClawModelAssignment(cId)
+    }
+    document.getElementById(`model-picker-${cId}`)?.classList.add('hidden')
+    loadClaws()
 }
 
 function buildSyncButtonHTML(claw, status) {
@@ -1511,29 +1689,25 @@ function toggleClawModelPicker(clawId) {
     const picker = document.getElementById(`model-picker-${clawId}`)
     if (!picker) return
     picker.classList.toggle('hidden')
+}
 
-    if (!picker.classList.contains('hidden')) {
-        picker.querySelectorAll('.model-picker-option').forEach(opt => {
-            opt.addEventListener('click', async () => {
-                const cId = opt.dataset.clawId
-                const pId = opt.dataset.providerId
-                const mId = opt.dataset.modelId
-                if (pId && mId) {
-                    await saveClawModelAssignment(cId, pId, mId)
-                } else {
-                    await removeClawModelAssignment(cId)
-                }
-                picker.classList.add('hidden')
-                loadClaws()
-            })
-        })
-    }
+/** Redraws one claw's card in place; used for state that changes without a server round trip. */
+function rerenderClawCard(clawId) {
+    const claw = clawsList.find(c => c.id === clawId)
+    const card = document.querySelector(`.card[data-claw-id="${CSS.escape(String(clawId))}"]`)
+    if (!claw || !card) return
+    const tmp = document.createElement('div')
+    tmp.innerHTML = createClawCard(claw)
+    const fresh = tmp.firstElementChild
+    if (!fresh) return
+    card.replaceWith(fresh)
+    bindClawCardActions(fresh)
 }
 
 async function syncClawAIConfig(clawId) {
     if (syncingClawIds[clawId]) return
     syncingClawIds[clawId] = true
-    loadClaws()
+    rerenderClawCard(clawId)
 
     try {
         const effective = getEffectiveClawModel(clawId)
@@ -1569,43 +1743,37 @@ async function syncClawAIConfig(clawId) {
         const modelId = effective.model.apiModelId || effective.model.id
         const modelValue = `${providerInfo.prefix}/${modelId}`
 
-        const success = await apiClient.updateClawAgentConfig(clawId, {
+        await apiClient.updateClawAgentConfig(clawId, {
             agentId: 'main',
             model: modelValue,
             envVars: Object.keys(envVars).length > 0 ? envVars : null
         })
-
-        if (success) {
-            showToast(I18n.t('toast.aiConfigApplied'), 'success')
-        } else {
-            showToast(I18n.t('toast.aiConfigFailed'), 'error')
-        }
+        showToast(I18n.t('toast.aiConfigApplied'), 'success')
     } catch (e) {
         showToast(I18n.t('toast.syncError', { msg: e.message }), 'error')
     } finally {
         delete syncingClawIds[clawId]
-        loadClaws()
+        rerenderClawCard(clawId)
     }
 }
 
 function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        showToast(I18n.t('toast.copiedClipboard'), 'success')
-    })
+    navigator.clipboard.writeText(text)
+        .then(() => showToast(I18n.t('toast.copiedClipboard'), 'success'))
+        .catch(() => showToast(I18n.t('toast.clipboardFailed'), 'error'))
 }
 
-function escapeHtml(str) {
-    if (!str) return ''
-    const div = document.createElement('div')
-    div.textContent = String(str)
-    return div.innerHTML
-}
+// escapeHtml comes from js/utils.js, shared with the other pages.
 
+let toastTimer = null
 function showToast(message, type = 'info', duration = 3000) {
     const toast = document.getElementById('toast')
     toast.textContent = message
     toast.className = `toast ${type} show`
-    setTimeout(() => {
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status')
+    // The previous toast's timer used to hide this one early.
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => {
         toast.classList.remove('show')
     }, duration)
 }
@@ -1620,37 +1788,41 @@ async function handleMountStorage(clawId, btn) {
         return
     }
 
-    if (remotes.length === 1) {
+    const mount = async (remoteId) => {
         btn.disabled = true
-        btn.innerHTML = '<div class="spinner" style="width:12px;height:12px;border-width:2px"></div> ' + I18n.t('ui.mounting')
-        const result = await apiClient.mountClawStorage(clawId, remotes[0].id)
-        if (result) {
+        btn.innerHTML = '<div class="spinner" style="width:12px;height:12px;border-width:2px"></div> ' + escapeHtml(I18n.t('ui.mounting'))
+        try {
+            await apiClient.mountClawStorage(clawId, remoteId)
             showToast(I18n.t('toast.storageMounted'), 'success')
-        } else {
+        } catch (e) {
             showToast(I18n.t('toast.storageMountFailed'), 'error')
         }
         setTimeout(loadClaws, 1000)
-        return
+    }
+
+    if (remotes.length === 1) {
+        await mount(remotes[0].id)
+        return false
     }
 
     const modal = document.createElement('div')
     modal.className = 'mount-picker-overlay'
     modal.innerHTML = `
-        <div class="mount-picker">
-            <div style="font-weight: 600; margin-bottom: 10px">${I18n.t('ui.selectStorageRemote')}</div>
+        <div class="mount-picker" role="dialog" aria-modal="true" aria-labelledby="mount-picker-title">
+            <div id="mount-picker-title" style="font-weight: 600; margin-bottom: 10px">${escapeHtml(I18n.t('ui.selectStorageRemote'))}</div>
             ${remotes.map(r => {
         const type = STORAGE_TYPES.find(t => t.id === r.type)
         return `
-                    <div class="mount-picker-item" data-remote-id="${escapeHtml(r.id)}">
+                    <button type="button" class="mount-picker-item" data-remote-id="${escapeHtml(r.id)}">
                         <span style="font-size: 18px">${type?.icon || '☁️'}</span>
                         <div>
                             <div style="font-weight: 500; font-size: 12px">${escapeHtml(r.name)}</div>
-                            <div style="font-size: 10px; color: var(--text-muted)">${type?.name || r.type}</div>
+                            <div style="font-size: 10px; color: var(--text-muted)">${escapeHtml(type?.name || r.type)}</div>
                         </div>
-                    </div>
+                    </button>
                 `
     }).join('')}
-            <button class="btn btn-secondary btn-full mt-2" id="btn-cancel-mount">${I18n.t('storage.cancel')}</button>
+            <button type="button" class="btn btn-secondary btn-full mt-2" id="btn-cancel-mount">${escapeHtml(I18n.t('storage.cancel'))}</button>
         </div>
     `
     document.body.appendChild(modal)
@@ -1660,17 +1832,11 @@ async function handleMountStorage(clawId, btn) {
         item.addEventListener('click', async () => {
             const remoteId = item.dataset.remoteId
             modal.remove()
-            btn.disabled = true
-            btn.innerHTML = '<div class="spinner" style="width:12px;height:12px;border-width:2px"></div> ' + I18n.t('ui.mounting')
-            const result = await apiClient.mountClawStorage(clawId, remoteId)
-            if (result) {
-                showToast(I18n.t('toast.storageMounted'), 'success')
-            } else {
-                showToast(I18n.t('toast.storageMountFailed'), 'error')
-            }
-            setTimeout(loadClaws, 1000)
+            await mount(remoteId)
         })
     })
+    modal.querySelector('.mount-picker-item')?.focus()
+    return false
 }
 
 function setupStoragePage() {
@@ -1694,7 +1860,7 @@ function setupStoragePage() {
 
 function showStorageModal(remote = null) {
     editingRemoteId = remote?.id || null
-    document.getElementById('storage-modal-title').textContent = remote ? 'Edit Storage Remote' : 'Add Storage Remote'
+    document.getElementById('storage-modal-title').textContent = I18n.t(remote ? 'storage.editRemote' : 'storage.addRemote')
     document.getElementById('storage-remote-name').value = remote?.name || ''
     document.getElementById('storage-remote-type').value = remote?.type || ''
     renderStorageFields(remote?.type || '', remote?.config || {})
@@ -1718,14 +1884,14 @@ function renderStorageFields(typeId, values = {}) {
 
     container.innerHTML = type.fields.map(field => `
         <div class="form-group">
-            <label class="form-label">${field.label}${field.optional ? ' (optional)' : ''}</label>
+            <label class="form-label" for="storage-field-${field.key}">${escapeHtml(field.label)}${field.optional ? ` ${escapeHtml(I18n.t('storage.optionalSuffix'))}` : ''}</label>
             <div class="token-input-wrapper">
                 ${field.multiline ? `
-                    <textarea class="token-input" id="storage-field-${field.key}" placeholder="${field.hint || `Enter ${field.label.toLowerCase()}`}" rows="3" style="resize: vertical; padding-right: 12px">${escapeHtml(values[field.key] || '')}</textarea>
+                    <textarea class="token-input" id="storage-field-${field.key}" placeholder="${escapeHtml(field.hint || I18n.t('storage.enterField', { field: field.label.toLowerCase() }))}" rows="3" style="resize: vertical; padding-right: 12px">${escapeHtml(values[field.key] || '')}</textarea>
                 ` : `
-                    <input type="${field.secret ? 'password' : 'text'}" class="token-input" id="storage-field-${field.key}" placeholder="${field.hint || `Enter ${field.label.toLowerCase()}`}" value="${escapeHtml(values[field.key] || '')}">
+                    <input type="${field.secret ? 'password' : 'text'}" class="token-input" id="storage-field-${field.key}" placeholder="${escapeHtml(field.hint || I18n.t('storage.enterField', { field: field.label.toLowerCase() }))}" value="${escapeHtml(values[field.key] || '')}">
                     ${field.secret ? `
-                        <button class="token-toggle" data-action="toggle-visibility" data-target="storage-field-${field.key}">
+                        <button type="button" class="token-toggle" data-action="toggle-visibility" data-target="storage-field-${field.key}" aria-label="${escapeHtml(I18n.t('ui.toggleVisibility'))}">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 256 256"><path d="M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,123.97,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.29A169.47,169.47,0,0,1,24.57,128,169.47,169.47,0,0,1,48.07,97.29C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.29A169.47,169.47,0,0,1,231.43,128C223.72,141.72,184.34,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z"/></svg>
                         </button>
                     ` : ''}
@@ -1743,11 +1909,13 @@ async function loadStorageRemotes() {
     try {
         const cloudRemotes = await apiClient.getCloudStorageConfigs()
         if (cloudRemotes && cloudRemotes.length > 0) {
-            const mergedIds = new Set(storageRemotes.map(r => r.id))
+            // Merge by id, then by name+type: a remote created here and echoed back by the
+            // server under its own id must not show up twice.
+            const byId = new Set(storageRemotes.map(r => r.id))
+            const byNameType = new Set(storageRemotes.map(r => `${r.name}\u0000${r.type}`))
             cloudRemotes.forEach(r => {
-                if (!mergedIds.has(r.id)) {
-                    storageRemotes.push(r)
-                }
+                if (byId.has(r.id) || byNameType.has(`${r.name}\u0000${r.type}`)) return
+                storageRemotes.push(r)
             })
             await chrome.storage.local.set({ storage_remotes: storageRemotes })
             renderStorageRemotes()
@@ -1777,18 +1945,18 @@ function renderStorageRemotes() {
                         <span style="font-size: 20px">${type?.icon || '☁️'}</span>
                         <div>
                             <div class="storage-remote-name">${escapeHtml(remote.name)}</div>
-                            <div style="font-size: 10px; color: var(--text-muted)">${type?.name || remote.type}</div>
+                            <div style="font-size: 10px; color: var(--text-muted)">${escapeHtml(type?.name || remote.type)}</div>
                         </div>
                     </div>
-                    ${remote.isEnabled !== false ? '<span class="storage-active-badge">Active</span>' : ''}
+                    ${remote.isEnabled !== false ? `<span class="storage-active-badge">${escapeHtml(I18n.t('storage.active'))}</span>` : ''}
                 </div>
                 <div class="storage-remote-actions">
-                    <button class="btn btn-secondary btn-small" data-action="sync-remote" data-remote-id="${escapeHtml(remote.id)}">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 256 256"><path d="M224,48V96a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h28.69L182.06,73.37a79.56,79.56,0,0,0-56.13-23.43h-.45A79.52,79.52,0,0,0,69.59,72.71,8,8,0,0,1,58.33,61.29,96,96,0,0,1,192.93,60.7L208,75.52V48a8,8,0,0,1,16,0Z"/></svg>
-                        Sync Now
+                    <button type="button" class="btn btn-secondary btn-small" data-action="sync-remote" data-remote-id="${escapeHtml(remote.id)}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 256 256" aria-hidden="true"><path d="M224,48V96a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h28.69L182.06,73.37a79.56,79.56,0,0,0-56.13-23.43h-.45A79.52,79.52,0,0,0,69.59,72.71,8,8,0,0,1,58.33,61.29,96,96,0,0,1,192.93,60.7L208,75.52V48a8,8,0,0,1,16,0Z"/></svg>
+                        ${escapeHtml(I18n.t('storage.syncNow'))}
                     </button>
-                    <button class="btn btn-secondary btn-small" data-action="edit-remote" data-remote-id="${escapeHtml(remote.id)}">Edit</button>
-                    <button class="btn btn-danger btn-small" data-action="delete-remote" data-remote-id="${escapeHtml(remote.id)}">Delete</button>
+                    <button type="button" class="btn btn-secondary btn-small" data-action="edit-remote" data-remote-id="${escapeHtml(remote.id)}">${escapeHtml(I18n.t('ui.edit'))}</button>
+                    <button type="button" class="btn btn-danger btn-small" data-action="delete-remote" data-remote-id="${escapeHtml(remote.id)}">${escapeHtml(I18n.t('ui.delete'))}</button>
                 </div>
             </div>
         `
@@ -1821,26 +1989,38 @@ async function saveStorageRemote() {
     const stored = await chrome.storage.local.get('storage_remotes')
     const remotes = stored.storage_remotes || []
 
-    if (editingRemoteId) {
+    // hideStorageModal() clears editingRemoteId; remember which case this was before that.
+    const wasEditing = !!editingRemoteId
+    const id = editingRemoteId || `remote_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+    // The same id goes to the server, so the copy it echoes back merges with this one instead
+    // of appearing as a second remote with the same name.
+    let saved = null
+    try {
+        saved = await apiClient.upsertCloudStorageConfig({ id, name, type, config })
+    } catch (e) {
+        showToast(I18n.t('toast.remoteSaveFailed', { msg: e.message }), 'error')
+        return
+    }
+    const finalId = saved?.data?.id || saved?.id || id
+
+    if (wasEditing) {
         const idx = remotes.findIndex(r => r.id === editingRemoteId)
         if (idx >= 0) {
-            remotes[idx] = { ...remotes[idx], name, type, config }
+            remotes[idx] = { ...remotes[idx], id: finalId, name, type, config }
+        } else {
+            remotes.push({ id: finalId, name, type, config, isEnabled: true, autoSync: false })
         }
     } else {
-        const id = `remote_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-        remotes.push({ id, name, type, config, isEnabled: true, autoSync: false })
+        remotes.push({ id: finalId, name, type, config, isEnabled: true, autoSync: false })
     }
 
     await chrome.storage.local.set({ storage_remotes: remotes })
     storageRemotes = remotes
 
-    const cloudData = { name, type, config }
-    if (editingRemoteId) cloudData.id = editingRemoteId
-    await apiClient.upsertCloudStorageConfig(cloudData)
-
     hideStorageModal()
     renderStorageRemotes()
-    showToast(editingRemoteId ? I18n.t('toast.remoteUpdated') : I18n.t('toast.remoteAdded'), 'success')
+    showToast(I18n.t(wasEditing ? 'toast.remoteUpdated' : 'toast.remoteAdded'), 'success')
 }
 
 function editStorageRemote(id) {
@@ -1851,12 +2031,21 @@ function editStorageRemote(id) {
 async function deleteStorageRemote(id) {
     if (!confirm(I18n.t('toast.confirmDeleteRemote'))) return
 
+    try {
+        await apiClient.deleteCloudStorageConfig(id)
+    } catch (e) {
+        // A remote the server never had (404) is fine to drop locally; anything else is not.
+        if (e.status !== 404) {
+            showToast(I18n.t('toast.remoteDeleteFailed', { msg: e.message }), 'error')
+            return
+        }
+    }
+
     const stored = await chrome.storage.local.get('storage_remotes')
     const remotes = (stored.storage_remotes || []).filter(r => r.id !== id)
     await chrome.storage.local.set({ storage_remotes: remotes })
     storageRemotes = remotes
 
-    await apiClient.deleteCloudStorageConfig(id)
     renderStorageRemotes()
     showToast(I18n.t('toast.remoteDeleted'), 'success')
 }
@@ -1864,9 +2053,14 @@ async function deleteStorageRemote(id) {
 async function handleSyncRemote(id) {
     // Backend sync runs ON a claw, so we need a running instance to execute it.
     if (!clawsList.length) {
-        clawsList = await apiClient.getClaws() || []
+        try {
+            clawsList = await apiClient.getClaws()
+        } catch (e) {
+            showToast(I18n.t('toast.loadClawsFailed', { msg: e.message }), 'error')
+            return
+        }
     }
-    const running = clawsList.filter(c => c.status === 'running')
+    const running = clawsList.filter(c => normalizeStatus(c.status) === 'running')
     if (running.length === 0) {
         showToast(I18n.t('toast.syncNeedsRunningClaw'), 'error')
         return
@@ -1880,10 +2074,10 @@ async function handleSyncRemote(id) {
 
 async function runRemoteSync(clawId, remoteId) {
     showToast(I18n.t('toast.syncing'), 'info')
-    const result = await apiClient.triggerCloudSync(clawId, remoteId)
-    if (result) {
+    try {
+        await apiClient.triggerCloudSync(clawId, remoteId)
         showToast(I18n.t('toast.syncStarted'), 'success')
-    } else {
+    } catch (e) {
         showToast(I18n.t('toast.syncFailed'), 'error')
     }
 }

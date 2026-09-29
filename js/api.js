@@ -1,20 +1,44 @@
 const DEFAULT_API_BASE_URL = 'https://awsapi.allianceinterstellar.com'
 let API_BASE_URL = DEFAULT_API_BASE_URL
 
-try {
-    chrome.storage.local.get('dev_api_url', (result) => {
+// The dev override is read asynchronously; requests wait for it so the first one does not go
+// to the default host while the override is still loading.
+const apiBaseReady = (async () => {
+    try {
+        const result = await chrome.storage.local.get('dev_api_url')
         if (result.dev_api_url) API_BASE_URL = result.dev_api_url
-    })
-    chrome.storage.onChanged.addListener((changes) => {
-        if (changes.dev_api_url) {
-            API_BASE_URL = changes.dev_api_url.newValue || DEFAULT_API_BASE_URL
-        }
-    })
-} catch (_) { }
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area === 'local' && changes.dev_api_url) {
+                API_BASE_URL = changes.dev_api_url.newValue || DEFAULT_API_BASE_URL
+            }
+        })
+    } catch (_) { }
+})()
+
+/**
+ * A failed request. `status` is the HTTP status (0 for a network failure), `code` a stable
+ * name callers can switch on without reading the message.
+ */
+class ApiError extends Error {
+    constructor(message, { status = 0, method = '', path = '', code = null } = {}) {
+        super(message)
+        this.name = 'ApiError'
+        this.status = status
+        this.method = method
+        this.path = path
+        this.code = code || (status === 401 ? 'UNAUTHORIZED' : status === 0 ? 'NETWORK' : `HTTP_${status}`)
+    }
+}
 
 class ApiClient {
     constructor() {
         this.authToken = null
+        /**
+         * Set by AuthService: asked to produce a fresh token when a request comes back 401.
+         * Returns the new token, or null when the session really is over.
+         */
+        this.onUnauthorized = null
+        this.timeoutMs = 30000
     }
 
     setAuthToken(token) {
@@ -25,7 +49,9 @@ class ApiClient {
         return API_BASE_URL
     }
 
-    async _request(method, path, data = null) {
+    async _request(method, path, data = null, { retryOn401 = true } = {}) {
+        await apiBaseReady
+
         const headers = {
             'Content-Type': 'application/json',
             'Accept': 'application/json'
@@ -39,7 +65,33 @@ class ApiClient {
             options.body = JSON.stringify(data)
         }
 
-        const response = await fetch(`${API_BASE_URL}${path}`, options)
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+        const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null
+        if (controller) options.signal = controller.signal
+
+        let response
+        try {
+            response = await fetch(`${API_BASE_URL}${path}`, options)
+        } catch (e) {
+            const timedOut = e && e.name === 'AbortError'
+            throw new ApiError(timedOut ? 'Request timed out' : (e.message || 'Network error'), {
+                status: 0, method, path, code: timedOut ? 'TIMEOUT' : 'NETWORK'
+            })
+        } finally {
+            if (timer) clearTimeout(timer)
+        }
+
+        if (response.status === 401 && retryOn401 && this.onUnauthorized) {
+            let fresh = null
+            try {
+                fresh = await this.onUnauthorized()
+            } catch (_) { }
+            if (fresh) {
+                this.authToken = fresh
+                return this._request(method, path, data, { retryOn401: false })
+            }
+        }
+
         if (!response.ok) {
             let errorMessage = `API Error: ${response.status} ${response.statusText}`
             try {
@@ -49,34 +101,25 @@ class ApiClient {
             } catch { }
             // Callers that need to tell one refusal from another read the status and the
             // request it answered, not the message text, which the server may reword.
-            const error = new Error(errorMessage)
-            error.status = response.status
-            error.method = method
-            error.path = path
-            throw error
+            throw new ApiError(errorMessage, { status: response.status, method, path })
         }
+        if (response.status === 204) return null
         return response.json()
     }
 
+    /**
+     * Read methods throw on failure. They used to return `[]`/`null`, which made a 401, a dead
+     * network and "you have no instances" look identical to every caller.
+     */
     async getClaws() {
-        try {
-            const result = await this._request('GET', '/claws')
-            const data = result.data
-            if (Array.isArray(data)) return data
-            return result.claws || []
-        } catch (e) {
-            console.error('Error fetching claws:', e)
-            return []
-        }
+        const result = await this._request('GET', '/claws')
+        const data = result?.data
+        if (Array.isArray(data)) return data
+        return result?.claws || []
     }
 
     async getClaw(id) {
-        try {
-            return await this._request('GET', `/claws/${encodeURIComponent(id)}`)
-        } catch (e) {
-            console.error('Error fetching claw:', e)
-            return null
-        }
+        return await this._request('GET', `/claws/${encodeURIComponent(id)}`)
     }
 
     async createClaw({ planId, name, location, provider, deploymentMethod, providerToken, aiProvider, aiModel, aiEnvVar }) {
@@ -91,199 +134,99 @@ class ApiClient {
         return await this._request('POST', '/claws', data)
     }
 
-    async deleteClaw(id) {
-        try {
-            await this._request('DELETE', `/claws/${encodeURIComponent(id)}`)
-            return true
-        } catch (e) {
-            console.error('Error deleting claw:', e)
-            try {
-                await this._request('DELETE', `/claws/${encodeURIComponent(id)}/force`)
-                return true
-            } catch {
-                return false
-            }
-        }
+    /**
+     * Mutations throw as well, so the UI can say what went wrong instead of toasting success.
+     * A forced delete is a separate, explicit call: it used to be tried automatically whenever
+     * the ordinary delete failed for any reason.
+     */
+    async deleteClaw(id, { force = false } = {}) {
+        const suffix = force ? '/force' : ''
+        await this._request('DELETE', `/claws/${encodeURIComponent(id)}${suffix}`)
+        return true
     }
 
     async startClaw(id) {
-        try {
-            await this._request('POST', `/claws/${encodeURIComponent(id)}/start`)
-            return true
-        } catch (e) {
-            console.error('Error starting claw:', e)
-            return false
-        }
+        await this._request('POST', `/claws/${encodeURIComponent(id)}/start`)
+        return true
     }
 
     async stopClaw(id) {
-        try {
-            await this._request('POST', `/claws/${encodeURIComponent(id)}/stop`)
-            return true
-        } catch (e) {
-            console.error('Error stopping claw:', e)
-            return false
-        }
+        await this._request('POST', `/claws/${encodeURIComponent(id)}/stop`)
+        return true
     }
 
     async restartClaw(id) {
-        try {
-            await this._request('POST', `/claws/${encodeURIComponent(id)}/restart`)
-            return true
-        } catch (e) {
-            console.error('Error restarting claw:', e)
-            return false
-        }
+        await this._request('POST', `/claws/${encodeURIComponent(id)}/restart`)
+        return true
     }
 
     async getCurrentUser() {
-        try {
-            return await this._request('GET', '/users/me')
-        } catch (e) {
-            console.error('Error fetching user:', e)
-            return null
-        }
+        return await this._request('GET', '/users/me')
     }
 
     async getProvisionProgress(id) {
-        try {
-            const result = await this._request('POST', `/claws/${encodeURIComponent(id)}/provision-progress`)
-            if (result && result.data) return result.data
-            return result
-        } catch (e) {
-            console.error('Error fetching provision progress:', e)
-            return null
-        }
+        const result = await this._request('POST', `/claws/${encodeURIComponent(id)}/provision-progress`)
+        if (result && result.data) return result.data
+        return result
     }
 
     async getProviderPlans(provider) {
-        try {
-            const result = await this._request('GET', `/plans?provider=${encodeURIComponent(provider)}`)
-            return result?.data || null
-        } catch (e) {
-            console.error('Error fetching provider plans:', e)
-            return null
-        }
+        const result = await this._request('GET', `/plans?provider=${encodeURIComponent(provider)}`)
+        return result?.data || null
     }
 
     async getProviderRegions(provider) {
-        try {
-            const result = await this._request('GET', `/plans/locations?provider=${encodeURIComponent(provider)}`)
-            return Array.isArray(result?.data) ? result.data : []
-        } catch (e) {
-            console.error('Error fetching provider regions:', e)
-            return []
-        }
-    }
-
-    async getProviderConfigs() {
-        try {
-            const result = await this._request('GET', '/provider-configs')
-            if (result && Array.isArray(result.data)) return result.data
-            return null
-        } catch (e) {
-            console.error('Error fetching provider configs:', e)
-            return null
-        }
+        const result = await this._request('GET', `/plans/locations?provider=${encodeURIComponent(provider)}`)
+        return Array.isArray(result?.data) ? result.data : []
     }
 
     async syncProviderConfig(provider, config) {
-        try {
-            return await this._request('PUT', '/provider-configs', {
-                provider,
-                tokens: config
-            })
-        } catch (e) {
-            console.error('Error syncing provider config:', e)
-            return null
-        }
+        return await this._request('PUT', '/provider-configs', {
+            provider,
+            tokens: config
+        })
     }
 
     async updateClawAgentConfig(clawId, { agentId, model, envVars }) {
-        try {
-            const data = { agentId: agentId || 'main' }
-            if (model) data.model = model
-            if (envVars && Object.keys(envVars).length > 0) data.envVars = envVars
-            await this._request('PUT', `/claws/${encodeURIComponent(clawId)}/agent-config`, data)
-            return true
-        } catch (e) {
-            console.error('Error updating claw agent config:', e)
-            return false
-        }
+        const data = { agentId: agentId || 'main' }
+        if (model) data.model = model
+        if (envVars && Object.keys(envVars).length > 0) data.envVars = envVars
+        await this._request('PUT', `/claws/${encodeURIComponent(clawId)}/agent-config`, data)
+        return true
     }
 
     async getCloudStorageConfigs() {
-        try {
-            const result = await this._request('GET', '/cloud-storage')
-            if (result && Array.isArray(result.data)) return result.data
-            return []
-        } catch (e) {
-            console.error('Error fetching cloud storage configs:', e)
-            return []
-        }
+        const result = await this._request('GET', '/cloud-storage')
+        if (result && Array.isArray(result.data)) return result.data
+        return []
     }
 
     async upsertCloudStorageConfig(data) {
-        try {
-            return await this._request('PUT', '/cloud-storage', data)
-        } catch (e) {
-            console.error('Error saving cloud storage config:', e)
-            return null
-        }
+        return await this._request('PUT', '/cloud-storage', data)
     }
 
     async deleteCloudStorageConfig(id) {
-        try {
-            await this._request('DELETE', `/cloud-storage/${encodeURIComponent(id)}`)
-            return true
-        } catch (e) {
-            console.error('Error deleting cloud storage config:', e)
-            return false
-        }
+        await this._request('DELETE', `/cloud-storage/${encodeURIComponent(id)}`)
+        return true
     }
 
     async mountClawStorage(clawId, storageConfigId) {
-        try {
-            return await this._request('POST', `/claws/${encodeURIComponent(clawId)}/mount`, { storageConfigId })
-        } catch (e) {
-            console.error('Error mounting storage:', e)
-            return null
-        }
+        return await this._request('POST', `/claws/${encodeURIComponent(clawId)}/mount`, { storageConfigId })
     }
 
     async unmountClawStorage(clawId) {
-        try {
-            return await this._request('DELETE', `/claws/${encodeURIComponent(clawId)}/mount`)
-        } catch (e) {
-            console.error('Error unmounting storage:', e)
-            return null
-        }
+        return await this._request('DELETE', `/claws/${encodeURIComponent(clawId)}/mount`)
     }
 
     async triggerCloudSync(clawId, storageConfigId) {
-        try {
-            // Backend triggerSync requires the claw to run the sync on plus the storage config.
-            return await this._request('POST', '/cloud-storage/sync', { clawId, storageConfigId })
-        } catch (e) {
-            console.error('Error triggering sync:', e)
-            return null
-        }
-    }
-
-    async getBackupStatus(remoteId) {
-        try {
-            const result = await this._request('GET', `/cloud-storage/sync/status?storageConfigId=${encodeURIComponent(remoteId)}`)
-            return result?.data || null
-        } catch (e) {
-            console.error('Error fetching backup status:', e)
-            return null
-        }
+        // Backend triggerSync requires the claw to run the sync on plus the storage config.
+        return await this._request('POST', '/cloud-storage/sync', { clawId, storageConfigId })
     }
 
     async installAgentSkill(clawId, agentId, skillName, content = null) {
+        const body = { action: 'install', skillName }
+        if (content) body.content = content
         try {
-            const body = { action: 'install', skillName }
-            if (content) body.content = content
             await this._request('PUT', `/claws/${encodeURIComponent(clawId)}/agents/${encodeURIComponent(agentId)}/skills`, body)
             return true
         } catch (e) {
@@ -293,26 +236,11 @@ class ApiClient {
     }
 
     async writeClawFile(clawId, filePath, content) {
-        try {
-            await this._request('PUT', `/claws/${encodeURIComponent(clawId)}/files`, {
-                path: filePath,
-                content
-            })
-            return true
-        } catch (e) {
-            console.error('Error writing claw file:', e)
-            return false
-        }
-    }
-
-    async getAgentSkills(clawId, agentId) {
-        try {
-            const result = await this._request('POST', `/claws/${encodeURIComponent(clawId)}/agents/${encodeURIComponent(agentId)}/skills`)
-            return result?.data || result?.skills || []
-        } catch (e) {
-            console.error('Error fetching agent skills:', e)
-            return []
-        }
+        await this._request('PUT', `/claws/${encodeURIComponent(clawId)}/files`, {
+            path: filePath,
+            content
+        })
+        return true
     }
 
     async readClawFile(clawId, filePath) {
@@ -338,4 +266,13 @@ function isOneAgentLimitRefusal(error) {
     return error?.status === 402 && error.method === 'POST' && error.path === '/claws'
 }
 
+/** A 401 that survived the refresh attempt: the user has to sign in again. */
+function isAuthExpired(error) {
+    return error?.status === 401
+}
+
 const apiClient = new ApiClient()
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { ApiClient, ApiError, isOneAgentLimitRefusal, isAuthExpired }
+}

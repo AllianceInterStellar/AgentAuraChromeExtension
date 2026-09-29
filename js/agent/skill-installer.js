@@ -54,93 +54,70 @@ Page elements are labeled with [ref] numbers. Use these to interact:
 `
 
 const SKILL_NAME = 'browser-automation'
-const STORAGE_KEY = 'skillInstalledClaws'
+const SKILL_STORAGE_KEY = 'skill_installed_claws'
 const SKILL_VERSION = 8
 
+/**
+ * Pushes the skill text above to a claw once per SKILL_VERSION. The record of what was
+ * installed lives in chrome.storage.local (shared with every other page of the extension),
+ * one in-flight install per claw is shared by concurrent callers, and a verification failure
+ * is a failure: it is not recorded, so the next run tries again.
+ */
 class SkillInstaller {
     constructor(apiClient) {
         this._apiClient = apiClient
         this._installedClaws = new Map()
-        this._loadState()
+        this._inflight = new Map()
+        this._loaded = this._loadState()
     }
 
-    _loadState() {
+    async _loadState() {
         try {
-            const stored = localStorage.getItem(STORAGE_KEY)
-            if (stored) {
-                const parsed = JSON.parse(stored)
-                if (Array.isArray(parsed)) {
-                    this._installedClaws = new Map()
-                } else if (parsed && typeof parsed === 'object') {
-                    this._installedClaws = new Map(Object.entries(parsed))
-                }
+            const stored = await chrome.storage.local.get(SKILL_STORAGE_KEY)
+            const parsed = stored[SKILL_STORAGE_KEY]
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                this._installedClaws = new Map(Object.entries(parsed))
             }
         } catch (_) { }
     }
 
-    _saveState() {
+    async _saveState() {
         try {
-            const obj = Object.fromEntries(this._installedClaws)
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(obj))
+            await chrome.storage.local.set({ [SKILL_STORAGE_KEY]: Object.fromEntries(this._installedClaws) })
         } catch (_) { }
     }
 
     async ensureSkillInstalled(clawId) {
-        if (this._installedClaws.get(clawId) === SKILL_VERSION) return true
+        await this._loaded
+        if (this.isInstalled(clawId)) return true
+        if (this._inflight.has(clawId)) return this._inflight.get(clawId)
 
-        if (this._installing) {
-            return new Promise(resolve => {
-                const check = setInterval(() => {
-                    if (!this._installing) {
-                        clearInterval(check)
-                        resolve(this._installedClaws.get(clawId) === SKILL_VERSION)
-                    }
-                }, 500)
-            })
-        }
+        const run = this._install(clawId).finally(() => this._inflight.delete(clawId))
+        this._inflight.set(clawId, run)
+        return run
+    }
 
-        this._installing = true
+    async _install(clawId) {
         try {
-            console.log('[SkillInstaller] Syncing browser-automation skill content...')
             const installed = await this._apiClient.installAgentSkill(clawId, 'main', SKILL_NAME, BROWSER_AUTOMATION_SKILL)
             if (!installed) {
                 console.error('[SkillInstaller] Failed to sync skill content')
                 return false
             }
 
-            console.log('[SkillInstaller] Verifying SKILL.md on server...')
             const skillPath = `agents/main/workspace/skills/${SKILL_NAME}/SKILL.md`
             const content = await this._apiClient.readClawFile(clawId, skillPath)
-            if (content && content.includes('Browser Automation')) {
-                console.log('[SkillInstaller] SKILL.md synced on server (%d chars)', content.length)
-            } else {
-                console.warn('[SkillInstaller] SKILL.md verification failed. Content:', content ? content.substring(0, 100) : 'null')
-            }
-
-            const config = await this._apiClient.readClawFile(clawId, 'openclaw.json')
-            if (config) {
-                try {
-                    const parsed = JSON.parse(config)
-                    const agents = parsed.agents || {}
-                    const mainAgent = agents.main || {}
-                    const skillEntries = mainAgent.skillEntries || parsed.skillEntries || {}
-                    console.log('[SkillInstaller] openclaw.json skillEntries:', JSON.stringify(skillEntries))
-                } catch (e) {
-                    console.log('[SkillInstaller] openclaw.json raw (first 300 chars):', config.substring(0, 300))
-                }
-            } else {
-                console.warn('[SkillInstaller] Could not read openclaw.json')
+            if (!content || !content.includes('Browser Automation')) {
+                console.warn('[SkillInstaller] SKILL.md verification failed:', content ? content.substring(0, 100) : 'null')
+                return false
             }
 
             this._installedClaws.set(clawId, SKILL_VERSION)
-            this._saveState()
-            console.log('[SkillInstaller] Skill sync complete')
+            await this._saveState()
             return true
         } catch (e) {
             console.error('[SkillInstaller] Failed to sync browser-automation skill:', e)
             return false
-        } finally {
-            this._installing = false
         }
     }
 
@@ -148,8 +125,8 @@ class SkillInstaller {
         return this._installedClaws.get(clawId) === SKILL_VERSION
     }
 
-    clearCache() {
+    async clearCache() {
         this._installedClaws.clear()
-        this._saveState()
+        await this._saveState()
     }
 }

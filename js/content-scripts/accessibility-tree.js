@@ -29,25 +29,36 @@
         return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: rect.top, left: rect.left }
     }
 
+    // Hard ceilings so a very large page (an endless feed, a huge table) cannot hold the main
+    // thread for seconds. The result says when it was cut short.
+    const MAX_VISITED_NODES = 5000
+    const MAX_TREE_ENTRIES = 1500
+    const SKIP_TAGS = new Set(['script', 'style', 'noscript', 'svg', 'path', 'meta', 'link', 'br', 'hr', 'template', 'iframe'])
+
     function buildAccessibilityTree(root, maxDepth = 8, filter = 'all') {
         resetElementMap()
         const tree = []
         const interactiveOnly = filter === 'interactive'
+        let visited = 0
+        let truncated = false
 
         function walk(node, depth) {
+            if (truncated) return
             if (depth > maxDepth) return
             if (!node || node.nodeType !== Node.ELEMENT_NODE) return
+            if (++visited > MAX_VISITED_NODES || tree.length >= MAX_TREE_ENTRIES) {
+                truncated = true
+                return
+            }
 
             const tag = node.tagName.toLowerCase()
-            const skipTags = ['script', 'style', 'noscript', 'svg', 'path', 'meta', 'link', 'br', 'hr']
-            if (skipTags.includes(tag)) return
+            if (SKIP_TAGS.has(tag)) return
+
+            const isVisible = isVisibleElement(node)
+            if (!isVisible) return
 
             const role = node.getAttribute('role') || getImplicitRole(tag)
-            const label = getAccessibleName(node)
             const isInteractive = isInteractiveElement(node)
-            const isVisible = isVisibleElement(node)
-
-            if (!isVisible) return
 
             for (const child of node.children) {
                 walk(child, depth + 1)
@@ -55,6 +66,7 @@
 
             if (interactiveOnly && !isInteractive) return
 
+            const label = getAccessibleName(node)
             const refId = isInteractive ? assignRefId(node) : undefined
             const rect = isInteractive ? node.getBoundingClientRect() : null
             const inViewport = rect ? (rect.top < window.innerHeight && rect.bottom > 0 && rect.left < window.innerWidth && rect.right > 0) : true
@@ -84,12 +96,16 @@
         }
 
         walk(root || document.body, 0)
+        tree.truncated = truncated
         return tree
     }
 
     function generatePageContent(filter = 'interactive', maxLength = 30000) {
         const tree = buildAccessibilityTree(document.body, 8, filter)
         const lines = []
+        // Running total instead of re-joining on every line, which was quadratic.
+        let length = 0
+        let cutOff = false
         for (const node of tree) {
             let line = ''
             if (node.ref) line += `[${node.ref}] `
@@ -103,12 +119,18 @@
             if (node.value) line += ` value="${node.value}"`
             if (node.href) line += ` → ${node.href.substring(0, 80)}`
             if (node.bbox) line += ` @(${node.bbox.x},${node.bbox.y})`
+            if (length + line.length + 1 > maxLength) {
+                cutOff = true
+                break
+            }
             lines.push(line)
-            if (lines.join('\n').length > maxLength) break
+            length += line.length + 1
         }
         return {
+            success: true,
             pageContent: lines.join('\n'),
             elementCount: tree.length,
+            truncated: !!(tree.truncated || cutOff),
             viewport: { width: window.innerWidth, height: window.innerHeight }
         }
     }
@@ -215,7 +237,7 @@
         } else if (message.type === 'CLICK_ELEMENT_BY_REF') {
             const el = getElementByRefId(message.refId)
             if (!el) {
-                sendResponse({ success: false, error: `Element [${message.refId}] not found` })
+                sendResponse({ success: false, code: 'ELEMENT_NOT_FOUND', error: `Element [${message.refId}] not found` })
             } else {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' })
                 setTimeout(() => {
@@ -233,7 +255,7 @@
         } else if (message.type === 'TYPE_IN_ELEMENT_BY_REF') {
             const el = getElementByRefId(message.refId)
             if (!el) {
-                sendResponse({ success: false, error: `Element [${message.refId}] not found` })
+                sendResponse({ success: false, code: 'ELEMENT_NOT_FOUND', error: `Element [${message.refId}] not found` })
             } else {
                 el.focus()
                 if (message.clear !== false) el.value = ''
@@ -246,7 +268,7 @@
         } else if (message.type === 'HOVER_ELEMENT_BY_REF') {
             const el = getElementByRefId(message.refId)
             if (!el) {
-                sendResponse({ success: false, error: `Element [${message.refId}] not found` })
+                sendResponse({ success: false, code: 'ELEMENT_NOT_FOUND', error: `Element [${message.refId}] not found` })
             } else {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' })
                 el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
@@ -256,7 +278,7 @@
         } else if (message.type === 'GET_ELEMENT_RECT') {
             const rect = getElementRect(message.refId)
             if (!rect) {
-                sendResponse({ success: false, error: `Element [${message.refId}] not found` })
+                sendResponse({ success: false, code: 'ELEMENT_NOT_FOUND', error: `Element [${message.refId}] not found` })
             } else {
                 sendResponse({ success: true, rect })
             }

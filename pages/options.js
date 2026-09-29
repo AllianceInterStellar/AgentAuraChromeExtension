@@ -3,6 +3,7 @@ let currentMode = 'ask'
 document.addEventListener('DOMContentLoaded', async () => {
     await I18n.init()
     I18n.applyToPage()
+    document.documentElement.lang = I18n.getLang()
 
     const langSelect = document.getElementById('setting-language')
     if (langSelect) {
@@ -10,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         langSelect.addEventListener('change', async () => {
             I18n.setLang(langSelect.value)
             I18n.applyToPage()
+            document.documentElement.lang = I18n.getLang()
             await loadSettings()
         })
     }
@@ -58,13 +60,15 @@ async function saveSettings() {
     const apiUrlInput = document.getElementById('setting-api-url')
     const apiUrl = apiUrlInput ? apiUrlInput.value.trim() : ''
 
+    const maxSteps = parseInt(document.getElementById('setting-max-steps').value, 10)
+    const quality = parseInt(document.getElementById('setting-screenshot-quality').value, 10)
     const toSet = {
         agent_permission_mode: currentMode,
         agent_settings: {
             blockedSitesEnabled: document.getElementById('setting-blocked-sites').checked,
             tabGroupEnabled: document.getElementById('setting-tab-group').checked,
-            maxSteps: parseInt(document.getElementById('setting-max-steps').value) || 50,
-            screenshotQuality: parseInt(document.getElementById('setting-screenshot-quality').value) || 80
+            maxSteps: Number.isFinite(maxSteps) ? clamp(maxSteps, 1, 500) : 50,
+            screenshotQuality: Number.isFinite(quality) ? clamp(quality, 10, 100) : 80
         }
     }
 
@@ -87,8 +91,8 @@ function renderShortcuts(shortcuts) {
     list.innerHTML = shortcuts.map(s => `
         <div class="shortcut-item">
             <span class="shortcut-text" title="${escapeAttr(s.text)}">${escapeHtml(s.name)}</span>
-            <span class="shortcut-uses">${s.uses} ${I18n.t('options.uses')}</span>
-            <button class="delete-btn" data-id="${s.id}">${I18n.t('sys.delete')}</button>
+            <span class="shortcut-uses">${toNumber(s.uses)} ${escapeHtml(I18n.t('options.uses'))}</span>
+            <button class="delete-btn" data-id="${escapeAttr(s.id)}">${escapeHtml(I18n.t('sys.delete'))}</button>
         </div>
     `).join('')
 
@@ -113,9 +117,9 @@ function renderTasks(tasks) {
         <div class="task-item">
             <div class="task-info">
                 <div class="task-name">${escapeHtml(t.name)}</div>
-                <div class="task-schedule">${I18n.t('sys.everyNMin', { n: t.intervalMinutes })} · ${t.runCount || 0} ${I18n.t('options.runs')} · ${t.enabled ? '✅ ' + I18n.t('options.active') : '⏸ ' + I18n.t('options.paused')}</div>
+                <div class="task-schedule">${escapeHtml(I18n.t('sys.everyNMin', { n: toNumber(t.intervalMinutes) }))} · ${toNumber(t.runCount)} ${escapeHtml(I18n.t('options.runs'))} · ${t.enabled ? '✅ ' + escapeHtml(I18n.t('options.active')) : '⏸ ' + escapeHtml(I18n.t('options.paused'))}</div>
             </div>
-            <button class="delete-btn" data-task-id="${t.id}" style="opacity:1">${I18n.t('sys.delete')}</button>
+            <button class="delete-btn" data-task-id="${escapeAttr(t.id)}" style="opacity:1">${escapeHtml(I18n.t('sys.delete'))}</button>
         </div>
     `).join('')
 
@@ -129,14 +133,4 @@ function renderTasks(tasks) {
             renderTasks(updated)
         })
     })
-}
-
-function escapeHtml(str) {
-    const div = document.createElement('div')
-    div.textContent = String(str || '')
-    return div.innerHTML
-}
-
-function escapeAttr(str) {
-    return String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }

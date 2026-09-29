@@ -1,83 +1,95 @@
+/**
+ * The side panel's view of the scheduled tasks. The list lives in chrome.storage.local; the
+ * service worker owns the alarms and bumps lastRun/runCount when one fires, so this class
+ * re-reads on every storage change instead of trusting its copy.
+ */
 class TaskScheduler {
+    static STORAGE_KEY = 'agent_scheduled_tasks'
+    static ALARM_PREFIX = 'scheduled_task_'
+    static MIN_INTERVAL_MINUTES = 1
+
     constructor() {
         this.tasks = []
+        this.onChange = null
+        try {
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'local' && changes[TaskScheduler.STORAGE_KEY]) {
+                    this.tasks = changes[TaskScheduler.STORAGE_KEY].newValue || []
+                    if (this.onChange) this.onChange(this.tasks)
+                }
+            })
+        } catch (_) { }
     }
 
     async init() {
-        const stored = await chrome.storage.local.get('agent_scheduled_tasks')
-        this.tasks = stored.agent_scheduled_tasks || []
+        const stored = await chrome.storage.local.get(TaskScheduler.STORAGE_KEY)
+        this.tasks = stored[TaskScheduler.STORAGE_KEY] || []
     }
 
-    async save() {
-        await chrome.storage.local.set({ agent_scheduled_tasks: this.tasks })
+    async _write(mutate) {
+        // Read-modify-write against storage, not against the in-memory copy, so a runCount the
+        // worker just bumped is not overwritten with a stale value.
+        const stored = await chrome.storage.local.get(TaskScheduler.STORAGE_KEY)
+        const tasks = stored[TaskScheduler.STORAGE_KEY] || []
+        const next = mutate(tasks) || tasks
+        await chrome.storage.local.set({ [TaskScheduler.STORAGE_KEY]: next })
+        this.tasks = next
+        return next
     }
 
-    async add(prompt, intervalMinutes, name) {
+    static normalizeInterval(minutes) {
+        const n = Math.floor(Number(minutes))
+        if (!Number.isFinite(n) || n < TaskScheduler.MIN_INTERVAL_MINUTES) return null
+        return n
+    }
+
+    async add(prompt, intervalMinutes, name, url = null) {
+        const interval = TaskScheduler.normalizeInterval(intervalMinutes)
+        if (!interval) throw new Error('Interval must be a whole number of minutes, at least 1')
         const task = {
             id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             name: name || prompt.substring(0, 40),
             prompt,
-            intervalMinutes,
+            url,
+            intervalMinutes: interval,
             enabled: true,
             lastRun: null,
             runCount: 0,
             createdAt: Date.now()
         }
-        this.tasks.push(task)
-        await this.save()
+        await this._write(tasks => [...tasks, task])
         await this.scheduleAlarm(task)
         return task
     }
 
     async remove(id) {
-        this.tasks = this.tasks.filter(t => t.id !== id)
-        await this.save()
-        await chrome.alarms.clear(`scheduled_task_${id}`)
+        await this._write(tasks => tasks.filter(t => t.id !== id))
+        await chrome.alarms.clear(TaskScheduler.ALARM_PREFIX + id)
     }
 
     async toggle(id) {
-        const task = this.tasks.find(t => t.id === id)
-        if (!task) return
-
-        task.enabled = !task.enabled
-        await this.save()
-
-        if (task.enabled) {
-            await this.scheduleAlarm(task)
+        let toggled = null
+        await this._write(tasks => tasks.map(t => {
+            if (t.id !== id) return t
+            toggled = { ...t, enabled: !t.enabled }
+            return toggled
+        }))
+        if (!toggled) return
+        if (toggled.enabled) {
+            await this.scheduleAlarm(toggled)
         } else {
-            await chrome.alarms.clear(`scheduled_task_${task.id}`)
+            await chrome.alarms.clear(TaskScheduler.ALARM_PREFIX + id)
         }
     }
 
     async scheduleAlarm(task) {
         if (!task.enabled) return
-        await chrome.alarms.create(`scheduled_task_${task.id}`, {
-            periodInMinutes: task.intervalMinutes
-        })
-    }
-
-    async scheduleAll() {
-        for (const task of this.tasks) {
-            if (task.enabled) {
-                await this.scheduleAlarm(task)
-            }
-        }
-    }
-
-    async markRun(id) {
-        const task = this.tasks.find(t => t.id === id)
-        if (task) {
-            task.lastRun = Date.now()
-            task.runCount++
-            await this.save()
-        }
+        const interval = TaskScheduler.normalizeInterval(task.intervalMinutes)
+        if (!interval) return
+        await chrome.alarms.create(TaskScheduler.ALARM_PREFIX + task.id, { periodInMinutes: interval })
     }
 
     getAll() {
         return this.tasks
-    }
-
-    getEnabled() {
-        return this.tasks.filter(t => t.enabled)
     }
 }

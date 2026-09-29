@@ -149,8 +149,8 @@
         const stepEl = indicatorEl.querySelector('#agentaura-step-text')
         const pulseEl = indicatorEl.querySelector('#agentaura-pulse')
 
-        textEl.textContent = statusText || 'AgentAura'
-        stepEl.textContent = stepText || ''
+        textEl.textContent = String(statusText || 'AgentAura').slice(0, 200)
+        stepEl.textContent = String(stepText || '').slice(0, 80)
         pulseEl.className = ''
         pulseEl.id = 'agentaura-pulse'
         pulseEl.classList.add('active')
@@ -190,14 +190,19 @@
         setTimeout(hide, 5000)
     }
 
+    // `text` and `icon` come from the side panel, which built them from the model's output. They
+    // are set as text, never parsed as HTML: this runs inside the page being automated.
     function addTimelineItem(icon, text, status) {
         if (!timelineEl) return
         const item = document.createElement('div')
         item.className = 'aa-timeline-item'
-        item.innerHTML = `
-            <span class="aa-timeline-icon ${status}">${icon}</span>
-            <span>${text}</span>
-        `
+        const iconEl = document.createElement('span')
+        iconEl.className = 'aa-timeline-icon' + (/^(done|running|failed)$/.test(status) ? ` ${status}` : '')
+        iconEl.textContent = String(icon ?? '')
+        const textEl = document.createElement('span')
+        textEl.textContent = String(text ?? '').slice(0, 200)
+        item.appendChild(iconEl)
+        item.appendChild(textEl)
         timelineEl.appendChild(item)
         if (timelineEl.children.length > 8) {
             timelineEl.removeChild(timelineEl.firstChild)
@@ -207,8 +212,8 @@
     function showClickIndicator(x, y) {
         const el = document.createElement('div')
         el.className = 'aa-click-indicator'
-        el.style.left = x + 'px'
-        el.style.top = y + 'px'
+        el.style.left = (Number(x) || 0) + 'px'
+        el.style.top = (Number(y) || 0) + 'px'
         document.documentElement.appendChild(el)
         setTimeout(() => el.remove(), 600)
     }

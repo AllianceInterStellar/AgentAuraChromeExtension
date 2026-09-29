@@ -42,8 +42,10 @@ function fakeElement() {
         style: {},
         scrollTop: 0,
         scrollHeight: 0,
-        classList: { add() { }, remove() { }, contains: () => false },
+        classList: { add() { }, remove() { }, contains: () => false, toggle() { } },
         addEventListener() { },
+        setAttribute() { },
+        querySelector: () => null,
         querySelectorAll: () => [],
     }
 }
@@ -63,8 +65,12 @@ function loadPopup(respond) {
     const context = vm.createContext({
         console: { log() { }, warn() { }, error() { } },
         setTimeout: () => 0,
+        clearTimeout() { },
         clearInterval() { },
         setInterval: () => 0,
+        AbortController,
+        CSS: { escape: (s) => String(s) },
+        location: { origin: 'chrome-extension://test' },
         fetch: async (url, options) => {
             requests.push({ url, method: options.method })
             return respond(url, options)
@@ -78,15 +84,28 @@ function loadPopup(respond) {
         document: {
             getElementById: element,
             addEventListener() { },
+            querySelector: () => null,
             querySelectorAll: () => [],
             createElement: () => fakeElement(),
+            documentElement: { lang: 'en' },
+            hidden: false,
         },
         window: {},
         navigator: { language: 'en' },
-        authService: { _refreshTokenIfNeeded: async () => { } },
+        authService: {
+            _refreshTokenIfNeeded: async () => { },
+            refreshAccessToken: async () => null,
+            currentUser: null,
+            idToken: null,
+            onAuthStateChanged() { },
+            isAuthenticated: () => false,
+        },
     })
     context.window.parent = context.window
-    for (const script of ['js/i18n.js', 'js/api.js', 'js/app.js']) {
+    // The same order as popup.html; chat.js is left out because app.js only needs the
+    // constants it defines, which are stubbed here.
+    vm.runInContext('const GATEWAY_DOMAIN = "digitalenginecore.com"', context)
+    for (const script of ['js/utils.js', 'js/i18n.js', 'js/api.js', 'js/app.js']) {
         vm.runInContext(read(script), context, { filename: script })
     }
     const run = (code) => vm.runInContext(code, context)

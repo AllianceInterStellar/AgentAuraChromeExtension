@@ -5,6 +5,9 @@ const GATEWAY_CONNECTION_STATE = {
     CONNECTED: 'connected'
 }
 
+const CHAT_TIMEOUT_MS = 120000
+const GATEWAY_DOMAIN = 'digitalenginecore.com'
+
 class DeviceIdentity {
     constructor(deviceId, publicKeyBase64, keyPair) {
         this.deviceId = deviceId
@@ -187,23 +190,12 @@ class ChatService {
 
     async connect() {
         if (this._state === GATEWAY_CONNECTION_STATE.CONNECTED) return true
-        if (this._state === GATEWAY_CONNECTION_STATE.CONNECTING || this._state === GATEWAY_CONNECTION_STATE.AUTHENTICATING) {
-            return new Promise((resolve) => {
-                const check = setInterval(() => {
-                    if (this._state === GATEWAY_CONNECTION_STATE.CONNECTED) {
-                        clearInterval(check)
-                        resolve(true)
-                    } else if (this._state === GATEWAY_CONNECTION_STATE.DISCONNECTED) {
-                        clearInterval(check)
-                        resolve(false)
-                    }
-                }, 200)
-            })
-        }
+        // A connect already under way: share its outcome instead of polling the state.
+        if (this._connectPromise) return this._connectPromise
 
         this._state = GATEWAY_CONNECTION_STATE.CONNECTING
 
-        return new Promise((resolve) => {
+        this._connectPromise = new Promise((resolve) => {
             let wsUrl = this.gatewayUrl
                 .replace('https://', 'wss://')
                 .replace('http://', 'ws://')
@@ -249,17 +241,31 @@ class ChatService {
                 clearTimeout(timeout)
                 this._handleDisconnect()
             }
+        }).finally(() => {
+            this._connectPromise = null
         })
+        return this._connectPromise
     }
 
     disconnect() {
         if (this._ws) {
+            this._ws.onclose = null
+            this._ws.onerror = null
             this._ws.close()
             this._ws = null
         }
         this._state = GATEWAY_CONNECTION_STATE.DISCONNECTED
+        for (const id in this._pendingRequests) {
+            if (this._pendingRequests[id].reject) {
+                this._pendingRequests[id].reject(new Error('Disconnected'))
+            }
+        }
         this._pendingRequests = {}
         this._eventListeners = {}
+        if (this._connectResolve) {
+            this._connectResolve(false)
+            this._connectResolve = null
+        }
     }
 
     async sendChatMessage({ message, sessionKey, attachments = [], onDelta, onComplete, onError }) {
@@ -324,13 +330,14 @@ class ChatService {
         }
 
         this._addEventListener('chat', chatListener)
+        const sentAt = Date.now()
 
         try {
             const requestPayload = {
                 sessionKey,
                 message,
                 deliver: true,
-                timeoutMs: 120000,
+                timeoutMs: CHAT_TIMEOUT_MS,
                 idempotencyKey
             }
 
@@ -352,11 +359,15 @@ class ChatService {
                 console.warn('[ChatService] chat.send rejected, waiting for events anyway')
             }
 
+            // One deadline for the whole exchange, counted from the send. _sendRequest has its
+            // own 120s for the acknowledgement; stacking another 120s on top meant a dead
+            // gateway could keep the UI spinning for four minutes.
+            const elapsed = Date.now() - sentAt
             const timeout = setTimeout(() => {
                 onComplete(lastContent)
                 this._removeEventListener('chat', chatListener)
                 resolve()
-            }, 120000)
+            }, Math.max(CHAT_TIMEOUT_MS - elapsed, 5000))
 
             await completePromise
             clearTimeout(timeout)
@@ -561,7 +572,7 @@ class ChatService {
         this._pendingRequests[id] = pending
         this._send(frame)
 
-        const timeoutMs = method === 'chat.send' ? 120000 : 15000
+        const timeoutMs = method === 'chat.send' ? CHAT_TIMEOUT_MS : 15000
         return Promise.race([
             pending.promise,
             new Promise((_, reject) =>
@@ -672,9 +683,9 @@ class ChatManager {
         renderChatUI(session)
         scrollChatToBottom()
 
-        const gatewayUrl = claw.subdomain ? `https://${claw.subdomain}.digitalenginecore.com` : null
+        const gatewayUrl = claw.subdomain ? `https://${claw.subdomain}.${GATEWAY_DOMAIN}` : null
         if (!gatewayUrl) {
-            this._updateLastAssistant(session, 'Gateway address unavailable', false, true)
+            this._updateLastAssistant(session, I18n.t('sys.gatewayFailed'), false, true)
             return
         }
 
@@ -771,26 +782,51 @@ class ChatManager {
 
 const chatManager = new ChatManager()
 
+// What each bubble was last rendered from, so a streaming delta touches one node instead of
+// re-parsing every message in the conversation on every token.
+const renderedBubbles = new Map()
+
 function renderChatUI(session) {
     const container = document.getElementById('chat-messages')
     const emptyState = document.getElementById('chat-empty')
     const noClaw = document.getElementById('chat-no-claw')
-    const inputBar = document.getElementById('chat-input-bar')
     const headerName = document.getElementById('chat-claw-name')
     const sendBtn = document.getElementById('btn-chat-send')
 
     if (noClaw) noClaw.classList.add('hidden')
 
     if (headerName) {
-        headerName.textContent = session.clawName || 'Chat'
+        headerName.textContent = session.clawName || I18n.t('nav.chat')
     }
 
     if (session.messages.length === 0) {
         container.innerHTML = ''
+        renderedBubbles.clear()
         emptyState.classList.remove('hidden')
     } else {
         emptyState.classList.add('hidden')
-        container.innerHTML = session.messages.map(msg => renderChatBubble(msg)).join('')
+        const ids = new Set(session.messages.map(m => m.id))
+        Array.from(container.children).forEach(el => {
+            if (!ids.has(el.dataset.msgId)) {
+                el.remove()
+                renderedBubbles.delete(el.dataset.msgId)
+            }
+        })
+        session.messages.forEach(msg => {
+            const signature = `${msg.role}|${msg.isStreaming ? 1 : 0}|${msg.isError ? 1 : 0}|${(msg.images || []).length}|${msg.content}`
+            let el = container.querySelector(`[data-msg-id="${msg.id}"]`)
+            if (el && renderedBubbles.get(msg.id) === signature) return
+            if (!el) {
+                el = document.createElement('div')
+                el.dataset.msgId = msg.id
+                el.className = 'chat-bubble-slot'
+                // The bubbles align themselves inside the flex column; the slot must not be a box.
+                el.style.display = 'contents'
+                container.appendChild(el)
+            }
+            el.innerHTML = renderChatBubble(msg)
+            renderedBubbles.set(msg.id, signature)
+        })
     }
 
     if (sendBtn) {
@@ -827,7 +863,9 @@ function renderChatBubble(msg) {
 
     if (msg.images && msg.images.length > 0) {
         for (const img of msg.images) {
-            html += `<img class="chat-image" src="data:${escapeHtml(img.mimeType)};base64,${img.base64Data}" alt="image">`
+            // The gateway sends the bytes; only a well-formed base64 data URL is put in `src`.
+            const src = sanitizeUrl(`data:${img.mimeType || 'image/png'};base64,${img.base64Data || ''}`, { allowDataImage: true })
+            if (src !== '#') html += `<img class="chat-image" src="${src}" alt="image">`
         }
     }
 
@@ -838,25 +876,32 @@ function renderChatBubble(msg) {
     }
 
     if (!msg.isStreaming && msg.content) {
-        html += `<div class="chat-msg-actions"><button class="chat-msg-action-btn" onclick="chatCopyMessage(this)" title="Copy"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button></div>`
+        // No inline onclick: the extension's CSP refuses inline handlers. A delegated listener
+        // in setupChatEventListeners handles the click.
+        html += `<div class="chat-msg-actions"><button type="button" class="chat-msg-action-btn" title="${escapeHtml(I18n.t('msg.copy'))}" aria-label="${escapeHtml(I18n.t('msg.copy'))}">${CHAT_COPY_ICON}</button></div>`
     }
 
     html += '</div>'
     return html
 }
 
+const CHAT_COPY_ICON = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>'
+const CHAT_COPIED_ICON = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>'
+
+function chatFlashCopied(btn) {
+    btn.innerHTML = CHAT_COPIED_ICON
+    btn.classList.add('copied')
+    setTimeout(() => {
+        btn.innerHTML = CHAT_COPY_ICON
+        btn.classList.remove('copied')
+    }, 2000)
+}
+
 function chatCopyMessage(btn) {
     const bubble = btn.closest('.chat-bubble')
-    const content = bubble.querySelector('.chat-bubble-content.assistant')
+    const content = bubble ? bubble.querySelector('.chat-bubble-content.assistant') : null
     if (!content) return
-    navigator.clipboard.writeText(content.textContent).then(() => {
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>'
-        btn.classList.add('copied')
-        setTimeout(() => {
-            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>'
-            btn.classList.remove('copied')
-        }, 2000)
-    })
+    navigator.clipboard.writeText(content.textContent).then(() => chatFlashCopied(btn)).catch(() => { })
 }
 
 function renderMarkdown(text) {
@@ -889,7 +934,12 @@ function renderMarkdown(text) {
 
     html = html.replace(/^---$/gm, '<hr class="chat-md-hr">')
 
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    // Only http(s) links survive; `javascript:` and the like become '#'. The href was escaped
+    // with the surrounding text, so undo that before checking the scheme.
+    html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, href) => {
+        const safe = sanitizeUrl(href.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"'))
+        return `<a href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+    })
 
     html = html.replace(/(^|\n)((?:- .+(?:\n|$))+)/g, (_, before, block) => {
         const items = block.trim().split('\n').map(l => `<li>${l.replace(/^- /, '')}</li>`).join('')
@@ -901,34 +951,30 @@ function renderMarkdown(text) {
         return `${before}<ol class="chat-md-list">${items}</ol>`
     })
 
+    // Replacement as a function: a `$&` or `$'` inside the code would otherwise be treated as
+    // a replacement pattern and splice surrounding text into the block.
     codeBlocks.forEach((block, idx) => {
         const langLabel = block.lang ? `<span class="chat-code-lang">${escapeHtml(block.lang)}</span>` : ''
-        const copyBtn = `<button class="chat-code-copy-btn" onclick="chatCopyCode(this)" title="Copy"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button>`
+        const copyBtn = `<button type="button" class="chat-code-copy-btn" title="${escapeHtml(I18n.t('msg.copy'))}" aria-label="${escapeHtml(I18n.t('msg.copy'))}">${CHAT_COPY_ICON}</button>`
         const replacement = `<div class="chat-code-wrapper"><div class="chat-code-header">${langLabel}${copyBtn}</div><pre class="chat-code-block"><code>${escapeHtml(block.code)}</code></pre></div>`
-        html = html.replace(`\x00CODEBLOCK_${idx}\x00`, replacement)
+        html = html.replace(`\x00CODEBLOCK_${idx}\x00`, () => replacement)
     })
 
     inlineCodes.forEach((code, idx) => {
-        html = html.replace(`\x00INLINE_${idx}\x00`, `<code class="chat-inline-code">${escapeHtml(code)}</code>`)
+        html = html.replace(`\x00INLINE_${idx}\x00`, () => `<code class="chat-inline-code">${escapeHtml(code)}</code>`)
     })
 
     html = html.replace(/\n\n/g, '</p><p>')
     html = html.replace(/\n/g, '<br>')
 
-    return html
+    return `<p>${html}</p>`
 }
 
 function chatCopyCode(btn) {
     const wrapper = btn.closest('.chat-code-wrapper')
-    const code = wrapper.querySelector('code').textContent
-    navigator.clipboard.writeText(code).then(() => {
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>'
-        btn.classList.add('copied')
-        setTimeout(() => {
-            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>'
-            btn.classList.remove('copied')
-        }, 2000)
-    })
+    const code = wrapper ? wrapper.querySelector('code')?.textContent : ''
+    if (!code) return
+    navigator.clipboard.writeText(code).then(() => chatFlashCopied(btn)).catch(() => { })
 }
 
 function scrollChatToBottom() {
@@ -978,6 +1024,16 @@ function setupChatEventListeners() {
 
     if (sendBtn) {
         sendBtn.addEventListener('click', handleChatSend)
+    }
+
+    const messagesEl = document.getElementById('chat-messages')
+    if (messagesEl) {
+        messagesEl.addEventListener('click', (e) => {
+            const msgBtn = e.target.closest('.chat-msg-action-btn')
+            if (msgBtn) { chatCopyMessage(msgBtn); return }
+            const codeBtn = e.target.closest('.chat-code-copy-btn')
+            if (codeBtn) chatCopyCode(codeBtn)
+        })
     }
 
     if (newSessionBtn) {

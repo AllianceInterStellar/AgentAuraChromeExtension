@@ -3,26 +3,20 @@
     "name": "AgentAura - OpenClaw Manager",
     "version": "3.0.2",
     "description": "Deploy, manage, and automate OpenClaw from Chrome with AI chat, cloud controls, and browser actions.",
+    "minimum_chrome_version": "137",
     "permissions": [
         "storage",
         "identity",
         "sidePanel",
-        "activeTab",
         "scripting",
         "debugger",
         "tabGroups",
         "tabs",
         "alarms",
         "notifications",
-        "system.display",
-        "webNavigation",
-        "offscreen",
         "downloads"
     ],
     "host_permissions": [
-        "https://awsapi.allianceinterstellar.com/*",
-        "https://d1em8r2hdbckr6.cloudfront.net/*",
-        "wss://*.digitalenginecore.com/*",
         "<all_urls>"
     ],
     "action": {
@@ -43,54 +37,19 @@
     "side_panel": {
         "default_path": "sidepanel.html"
     },
-    "content_scripts": [
-        {
-            "matches": [
-                "<all_urls>"
-            ],
-            "js": [
-                "js/content-scripts/agent-visual-indicator.js"
-            ],
-            "run_at": "document_idle",
-            "all_frames": false
-        },
-        {
-            "matches": [
-                "<all_urls>"
-            ],
-            "js": [
-                "js/content-scripts/accessibility-tree.js"
-            ],
-            "run_at": "document_start",
-            "all_frames": false
-        }
-    ],
     "options_page": "pages/options.html",
     "commands": {
         "_execute_side_panel": {
             "suggested_key": {
-                "default": "Ctrl+E",
-                "mac": "Command+E"
+                "default": "Alt+Shift+E"
             },
             "description": "Open AgentAura side panel"
         },
         "toggle-agent": {
             "suggested_key": {
-                "default": "Ctrl+Shift+A",
-                "mac": "Command+Shift+A"
+                "default": "Alt+Shift+A"
             },
             "description": "Toggle agent mode"
         }
-    },
-    "web_accessible_resources": [
-        {
-            "resources": [
-                "icons/*",
-                "css/*"
-            ],
-            "matches": [
-                "<all_urls>"
-            ]
-        }
-    ]
+    }
 }

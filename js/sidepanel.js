@@ -1,6 +1,7 @@
 const sidepanel = (() => {
-    const apiClient = new ApiClient()
-    const authService = new AuthService()
+    // apiClient and authService are the shared instances from api.js and auth.js. The panel
+    // used to build its own pair, which left the 401-refresh hook (wired between the shared
+    // ones) pointing at objects this page never used.
 
     const automationEngine = new AutomationEngine()
     const tabManager = new TabManager()
@@ -20,9 +21,25 @@ const sidepanel = (() => {
     let conversationHistory = []
     let agentLoopRunning = false
     let agentStepCount = 0
-    const MAX_AGENT_STEPS = 30
+    let llmRoundCount = 0
+    let nativeToolRetryCount = 0
+    let loopStartedAt = 0
+    let monitoredTabId = null
+    /**
+     * Every run gets a number. Callbacks captured by an earlier run compare against it and
+     * bail out, so a Stop, a New Chat or a fast second Send cannot leave two loops driving the
+     * same page with a shared step counter.
+     */
+    let currentRunId = 0
+
+    let MAX_AGENT_STEPS = 30
+    const MAX_LLM_ROUNDS_FACTOR = 2
+    const MAX_NATIVE_TOOL_RETRIES = 3
+    const MAX_LOOP_DURATION_MS = 10 * 60 * 1000
     const MAX_CONTEXT_MESSAGES = 20
     const MAX_ACTION_RETRIES = 2
+    const MAX_SAVED_MESSAGES = 200
+    const HISTORY_KEY_PREFIX = 'sp_chat_history_'
     const INLINE_BROWSER_AUTOMATION_PROMPT = [
         '[System] You are controlling a browser through this Chrome extension.',
         'The built-in browser tool is broken in this environment and will fail with pairing errors.',
@@ -43,21 +60,36 @@ const sidepanel = (() => {
         '4. When the task is complete, stop emitting actions and provide a plain-text summary.'
     ].join('\n')
 
+    // Codes the worker attaches to a failed action. Only these are worth a retry; the message
+    // text is translated and never inspected.
+    const RETRYABLE_CODES = new Set(['ELEMENT_NOT_FOUND', 'NO_RESULT', 'CONTENT_SCRIPT_UNAVAILABLE'])
+    // Chrome's own wording when a tab has no listener yet. Not translated by anyone.
+    const RETRYABLE_RUNTIME_ERRORS = [
+        'Receiving end does not exist',
+        'Could not establish connection',
+        'The message port closed before a response was received'
+    ]
+    const RETRYABLE_ACTION_TYPES = new Set(['click_ref', 'type_ref', 'hover_ref', 'read_page_content', 'find', 'get_page_text', 'execute_js', 'navigate', 'new_tab'])
+
     const $ = (sel) => document.querySelector(sel)
     const $$ = (sel) => document.querySelectorAll(sel)
 
     async function init() {
         await I18n.init()
         I18n.applyToPage()
+        document.documentElement.lang = I18n.getLang()
         updateTabCount()
 
         await authService.init()
         await permissionManager.init()
         await shortcutsManager.init()
         await taskScheduler.init()
+        await loadSettings()
 
         permissionManager.onApprovalNeeded = showActionApproval
         permissionManager.onPlanApproval = showPlanApproval
+        permissionManager.onResolved = hideApprovalOverlays
+        taskScheduler.onChange = () => renderScheduledTasks()
 
         if (!authService.idToken) {
             try {
@@ -75,18 +107,49 @@ const sidepanel = (() => {
         renderMessages()
         renderScheduledTasks()
 
+        let activeTabId = null
         try {
             const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
             if (activeTab && activeTab.id) {
+                activeTabId = activeTab.id
                 await chrome.runtime.sendMessage({ type: 'TAB_GROUP_ENSURE', tabId: activeTab.id, title: 'AgentAura' }).catch(() => { })
             }
         } catch (_) { }
 
-        chrome.runtime.onMessage.addListener((msg) => {
-            if (msg.type === 'SCHEDULED_TASK_EXECUTE' && msg.task) {
-                handleScheduledTaskExec(msg.task)
+        chrome.runtime.onMessage.addListener((msg, sender) => {
+            if (msg.type === 'WORKFLOW_RECORD_ACTION' && msg.action) {
+                // Only the tab the recording was started on; anything else is noise.
+                if (isRecording && sender.tab && sender.tab.id === workflowRecorder.tabId) {
+                    workflowRecorder.recordAction(msg.action)
+                }
             }
         })
+
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area !== 'local') return
+            if (changes.agent_settings) loadSettings()
+            if (changes.agent_permission_mode) {
+                permissionManager.mode = changes.agent_permission_mode.newValue || 'ask'
+                applyPermissionMode(permissionManager.mode)
+            }
+        })
+
+        // A scheduled task parked by the worker for this tab. Pulled here, once the panel is
+        // ready, rather than pushed at a panel that may not have been listening.
+        try {
+            const pending = await chrome.runtime.sendMessage({ type: 'TAKE_PENDING_SCHEDULED_TASK', tabId: activeTabId })
+            if (pending && pending.task) {
+                handleScheduledTaskExec(pending.task)
+            }
+        } catch (_) { }
+    }
+
+    async function loadSettings() {
+        try {
+            const stored = await chrome.storage.local.get('agent_settings')
+            const steps = parseInt(stored.agent_settings?.maxSteps, 10)
+            if (steps >= 1) MAX_AGENT_STEPS = steps
+        } catch (_) { }
     }
 
     function bindUIEvents() {
@@ -99,6 +162,9 @@ const sidepanel = (() => {
         })
 
         window.addEventListener('message', (e) => {
+            // Only the embedded manage page may drive this window.
+            const frame = $('#manage-iframe')
+            if (!frame || e.source !== frame.contentWindow) return
             if (!e.data) return
             if (e.data.type === 'SWITCH_TO_CHAT') {
                 switchMainTab('chat')
@@ -108,7 +174,11 @@ const sidepanel = (() => {
             }
         })
 
-        $('#sp-btn-send').addEventListener('click', handleSend)
+        // While the agent runs, the send button is drawn as a stop button and has to act as one.
+        $('#sp-btn-send').addEventListener('click', () => {
+            if (isGenerating) handleStopAgent()
+            else handleSend()
+        })
         let isComposing = false
         $('#sp-input').addEventListener('compositionstart', () => { isComposing = true })
         $('#sp-input').addEventListener('compositionend', () => { isComposing = false })
@@ -154,6 +224,13 @@ const sidepanel = (() => {
         $('#sp-btn-reject-plan').addEventListener('click', () => permissionManager.rejectPlan())
         $('#sp-btn-approve-plan').addEventListener('click', () => permissionManager.approvePlanExecution())
 
+        // Escape answers an open approval with "no", so a keyboard user is never stuck.
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return
+            if (!$('#sp-approval-overlay').classList.contains('hidden')) permissionManager.deny()
+            else if (!$('#sp-plan-overlay').classList.contains('hidden')) permissionManager.rejectPlan()
+        })
+
         $('#sp-btn-add-shortcut').addEventListener('click', handleAddShortcut)
         $('#sp-shortcuts-search').addEventListener('input', renderShortcutsList)
 
@@ -165,6 +242,15 @@ const sidepanel = (() => {
         })
 
         $('#sp-claw-select').addEventListener('change', handleClawChange)
+
+        // Copy buttons are rendered into innerHTML. Inline onclick attributes are refused by
+        // the extension's CSP, so one delegated listener handles all of them.
+        $('#sp-messages').addEventListener('click', (e) => {
+            const msgBtn = e.target.closest('.sp-msg-action-btn')
+            if (msgBtn) { copyMessageText(msgBtn); return }
+            const codeBtn = e.target.closest('.sp-code-copy-btn')
+            if (codeBtn) copyCodeBlock(codeBtn)
+        })
     }
 
     function switchMainTab(viewName) {
@@ -186,7 +272,9 @@ const sidepanel = (() => {
 
     function applyPermissionMode(mode) {
         $$('.sp-perm-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.mode === mode)
+            const active = btn.dataset.mode === mode
+            btn.classList.toggle('active', active)
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false')
         })
     }
 
@@ -203,7 +291,7 @@ const sidepanel = (() => {
             const claws = await apiClient.getClaws()
             const select = $('#sp-claw-select')
             const prevValue = select.value
-            select.innerHTML = `<option value="">${I18n.t('sys.selectInstance')}...</option>`
+            select.innerHTML = `<option value="">${escapeHtml(I18n.t('sys.selectInstance'))}...</option>`
 
             const statusLabel = { running: '', configuring: ` (${I18n.t('status.configuring')})`, starting: ` (${I18n.t('status.starting')})`, initializing: ` (${I18n.t('status.initializing')})`, stopped: ` (${I18n.t('status.stopped')})`, error: ` (${I18n.t('status.error')})` }
 
@@ -214,7 +302,7 @@ const sidepanel = (() => {
                 const label = statusLabel[s] || ` (${s})`
                 option.textContent = (claw.name || claw.id) + (s === 'running' ? '' : label)
                 if (s === 'running' && claw.subdomain) {
-                    option.dataset.gatewayUrl = `https://${claw.subdomain}.digitalenginecore.com`
+                    option.dataset.gatewayUrl = gatewayUrlFor(claw.subdomain)
                     option.dataset.gatewayToken = claw.gatewayToken || ''
                 } else {
                     option.disabled = true
@@ -222,9 +310,9 @@ const sidepanel = (() => {
                 select.appendChild(option)
             })
 
-            const runningClaws = claws.filter(c => c.status === 'running' && c.subdomain)
+            const runningClaws = claws.filter(c => (c.status || '').toLowerCase() === 'running' && c.subdomain)
 
-            if (prevValue && select.querySelector(`option[value="${prevValue}"]:not(:disabled)`)) {
+            if (prevValue && select.querySelector(`option[value="${CSS.escape(prevValue)}"]:not(:disabled)`)) {
                 select.value = prevValue
             } else if (runningClaws.length >= 1) {
                 select.value = runningClaws[0].id
@@ -232,7 +320,17 @@ const sidepanel = (() => {
             }
         } catch (e) {
             console.error('[SidePanel] loadClaws error:', e)
+            if (e && e.status === 401) {
+                addSystemMessage(I18n.t('sys.authExpired'))
+            } else {
+                addSystemMessage(I18n.t('sys.loadClawsFailed', { msg: e.message || '' }))
+            }
         }
+    }
+
+    function gatewayUrlFor(subdomain) {
+        // GATEWAY_DOMAIN comes from chat.js, loaded before this file.
+        return `https://${subdomain}.${GATEWAY_DOMAIN}`
     }
 
     async function handleClawChange() {
@@ -248,6 +346,8 @@ const sidepanel = (() => {
             return
         }
 
+        if (activeClaw && activeClaw.id === selectedOption.value) return
+
         activeClaw = {
             id: selectedOption.value,
             name: selectedOption.textContent,
@@ -261,6 +361,8 @@ const sidepanel = (() => {
 
         chatService = new ChatService(activeClaw.gatewayUrl, activeClaw.gatewayToken)
         sessionKey = null
+
+        await restoreMessages(activeClaw.id)
 
         skillInstaller.ensureSkillInstalled(activeClaw.id).then(ok => {
             if (ok) console.log('[SidePanel] Browser automation skill ready')
@@ -293,46 +395,65 @@ const sidepanel = (() => {
 
         addMessage('user', text)
 
-        agentStepCount = 0
         await runAgentLoop(text)
+    }
 
-        pendingScreenshot = null
+    function startRun() {
+        currentRunId++
+        automationEngine.reset()
+        agentStepCount = 0
+        llmRoundCount = 0
+        nativeToolRetryCount = 0
+        loopStartedAt = Date.now()
+        isGenerating = true
+        agentLoopRunning = true
+        updateGeneratingUI()
+        updateStepCounter(0, MAX_AGENT_STEPS)
+        return currentRunId
+    }
+
+    function runIsCurrent(runId) {
+        return runId === currentRunId && agentLoopRunning
+    }
+
+    /** Why the loop must stop, or null if it may go on. */
+    function loopLimitReason() {
+        if (agentStepCount >= MAX_AGENT_STEPS) return I18n.t('sys.limitSteps', { max: MAX_AGENT_STEPS })
+        if (llmRoundCount >= MAX_AGENT_STEPS * MAX_LLM_ROUNDS_FACTOR) return I18n.t('sys.limitRounds', { max: MAX_AGENT_STEPS * MAX_LLM_ROUNDS_FACTOR })
+        if (Date.now() - loopStartedAt > MAX_LOOP_DURATION_MS) return I18n.t('sys.limitTime', { minutes: Math.round(MAX_LOOP_DURATION_MS / 60000) })
+        return null
     }
 
     async function runAgentLoop(userMessage) {
         if (isGenerating) return
-        isGenerating = true
-        agentLoopRunning = true
-        updateGeneratingUI()
+        const runId = startRun()
 
         try {
             if (activeClaw && !skillInstaller.isInstalled(activeClaw.id)) {
                 addSystemMessage(I18n.t('sys.syncingSkill'))
                 const skillOk = await skillInstaller.ensureSkillInstalled(activeClaw.id)
-                if (skillOk) {
-                    addSystemMessage(I18n.t('sys.skillSynced'))
-                } else {
-                    addSystemMessage(I18n.t('sys.skillSyncFailed'))
-                }
+                if (!runIsCurrent(runId)) return
+                addSystemMessage(I18n.t(skillOk ? 'sys.skillSynced' : 'sys.skillSyncFailed'))
             }
 
             if (!chatService.isConnected) {
                 let ok = false
-                for (let attempt = 0; attempt < 4 && !ok; attempt++) {
+                for (let attempt = 0; attempt < 4 && !ok && runIsCurrent(runId); attempt++) {
                     if (attempt > 0) await new Promise(r => setTimeout(r, 3000))
+                    if (!runIsCurrent(runId)) return
                     ok = await chatService.connect()
                 }
+                if (!runIsCurrent(runId)) return
                 if (!ok) {
                     addSystemMessage(I18n.t('sys.gatewayFailed'))
-                    isGenerating = false
-                    agentLoopRunning = false
-                    updateGeneratingUI()
+                    finishAgentLoop(runId, 'idle')
                     return
                 }
             }
 
             if (!sessionKey) {
                 sessionKey = await chatService.resolveSessionKey('main')
+                if (!runIsCurrent(runId)) return
             }
 
             const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -353,137 +474,111 @@ const sidepanel = (() => {
 
             await startMonitoring()
 
-            const contextInfo = await gatherPageContext(true)
+            // The screenshot the user attached is for this first turn only. Later turns take
+            // a fresh one, or the model would be judging a stale picture of the page.
+            const contextInfo = await gatherPageContext(true, pendingScreenshot)
+            pendingScreenshot = null
             const tabContext = await gatherTabContext()
+            if (!runIsCurrent(runId)) return
             const fullMessage = buildAgentMessage(userMessage, contextInfo, tabContext)
             const attachments = buildMessageAttachments(contextInfo)
             trimConversationHistory()
 
-            const assistantId = addMessage('assistant', '', true)
-            let fullResponse = ''
-
-            await chatService.sendChatMessage({
-                message: fullMessage,
-                sessionKey,
-                attachments,
-                onDelta: (parsed) => {
-                    fullResponse = parsed.text || ''
-                    updateMessage(assistantId, fullResponse, true)
-                },
-                onComplete: async (parsed) => {
-                    fullResponse = parsed.text || I18n.t('sys.noReply')
-                    updateMessage(assistantId, fullResponse, false)
-
-                    const actions = extractActions(fullResponse)
-                    if (shouldForceActionRetry(fullResponse, actions) && agentLoopRunning && agentStepCount < MAX_AGENT_STEPS) {
-                        const retryContext = await gatherPageContext(true)
-                        const retryTabs = await gatherTabContext()
-                        const retryMessage = buildNativeToolFallbackMessage(fullResponse, retryContext, retryTabs)
-                        await continueAgentLoop(retryMessage, buildMessageAttachments(retryContext))
-                        return
-                    }
-
-                    if (actions.length > 0 && agentLoopRunning && agentStepCount < MAX_AGENT_STEPS) {
-                        const execution = await executeAgentActions(actions)
-
-                        if (execution.failedAction && agentLoopRunning && agentStepCount < MAX_AGENT_STEPS) {
-                            await new Promise(r => setTimeout(r, 400))
-                            const recoveryContext = await gatherPageContext(true)
-                            const recoveryTabs = await gatherTabContext()
-                            const recoveryMsg = buildRecoveryMessage(execution.failedAction, execution.failedResult, recoveryContext, recoveryTabs)
-                            await continueAgentLoop(recoveryMsg, buildMessageAttachments(recoveryContext))
-                        } else if (agentLoopRunning && agentStepCount < MAX_AGENT_STEPS) {
-                            await new Promise(r => setTimeout(r, 500))
-                            const verifyContext = await gatherPageContext(true)
-                            const verifyTabs = await gatherTabContext()
-                            const verifyMsg = buildVerifyMessage(execution.executedActions, verifyContext, verifyTabs)
-                            await continueAgentLoop(verifyMsg, buildMessageAttachments(verifyContext))
-                        } else {
-                            finishAgentLoop()
-                        }
-                    } else {
-                        finishAgentLoop()
-                    }
-                },
-                onError: (error) => {
-                    updateMessage(assistantId, error, false, true)
-                    finishAgentLoop()
-                }
-            })
+            await sendModelTurn(runId, fullMessage, attachments)
         } catch (e) {
+            if (!runIsCurrent(runId)) return
             notifyAgentGroupState('error')
             addSystemMessage(I18n.t('sys.connectError', { msg: e.message }))
-            finishAgentLoop()
+            finishAgentLoop(runId)
         }
     }
 
-    async function continueAgentLoop(message, attachments = []) {
-        if (!agentLoopRunning || agentStepCount >= MAX_AGENT_STEPS) {
-            finishAgentLoop()
+    async function continueAgentLoop(runId, message, attachments = []) {
+        if (!runIsCurrent(runId)) return
+        const limit = loopLimitReason()
+        if (limit) {
+            addSystemMessage(I18n.t('sys.loopLimit', { reason: limit }))
+            finishAgentLoop(runId)
             return
         }
+        try {
+            await sendModelTurn(runId, message, attachments)
+        } catch (e) {
+            if (!runIsCurrent(runId)) return
+            notifyAgentGroupState('error')
+            addSystemMessage(I18n.t('sys.loopError', { msg: e.message }))
+            finishAgentLoop(runId)
+        }
+    }
 
+    /** One request to the model and whatever its answer asks for. Shared by the first and every later turn. */
+    async function sendModelTurn(runId, message, attachments) {
+        llmRoundCount++
         const assistantId = addMessage('assistant', '', true)
         let fullResponse = ''
 
-        try {
-            await chatService.sendChatMessage({
-                message,
-                sessionKey,
-                attachments,
-                onDelta: (parsed) => {
-                    fullResponse = parsed.text || ''
-                    updateMessage(assistantId, fullResponse, true)
-                },
-                onComplete: async (parsed) => {
-                    fullResponse = parsed.text || ''
-                    updateMessage(assistantId, fullResponse, false)
+        await chatService.sendChatMessage({
+            message,
+            sessionKey,
+            attachments,
+            onDelta: (parsed) => {
+                if (!runIsCurrent(runId)) return
+                fullResponse = parsed.text || ''
+                updateMessage(assistantId, fullResponse, true)
+            },
+            onComplete: async (parsed) => {
+                if (!runIsCurrent(runId)) return
+                fullResponse = parsed.text || I18n.t('sys.noReply')
+                updateMessage(assistantId, fullResponse, false)
 
-                    const actions = extractActions(fullResponse)
-                    if (shouldForceActionRetry(fullResponse, actions) && agentLoopRunning && agentStepCount < MAX_AGENT_STEPS) {
-                        const retryContext = await gatherPageContext(true)
-                        const retryTabs = await gatherTabContext()
-                        const retryMessage = buildNativeToolFallbackMessage(fullResponse, retryContext, retryTabs)
-                        await continueAgentLoop(retryMessage, buildMessageAttachments(retryContext))
+                const actions = extractActions(fullResponse)
+                if (shouldForceActionRetry(fullResponse, actions)) {
+                    nativeToolRetryCount++
+                    if (nativeToolRetryCount > MAX_NATIVE_TOOL_RETRIES) {
+                        addSystemMessage(I18n.t('sys.loopLimit', { reason: I18n.t('sys.limitToolRetries', { max: MAX_NATIVE_TOOL_RETRIES }) }))
+                        finishAgentLoop(runId)
                         return
                     }
-
-                    if (actions.length > 0 && agentLoopRunning && agentStepCount < MAX_AGENT_STEPS) {
-                        const execution = await executeAgentActions(actions)
-
-                        if (execution.failedAction && agentLoopRunning && agentStepCount < MAX_AGENT_STEPS) {
-                            await new Promise(r => setTimeout(r, 400))
-                            const recoveryContext = await gatherPageContext(true)
-                            const recoveryTabs = await gatherTabContext()
-                            const recoveryMsg = buildRecoveryMessage(execution.failedAction, execution.failedResult, recoveryContext, recoveryTabs)
-                            await continueAgentLoop(recoveryMsg, buildMessageAttachments(recoveryContext))
-                        } else if (agentLoopRunning && agentStepCount < MAX_AGENT_STEPS) {
-                            await new Promise(r => setTimeout(r, 500))
-                            const verifyContext = await gatherPageContext(true)
-                            const verifyTabs = await gatherTabContext()
-                            const verifyMsg = buildVerifyMessage(execution.executedActions, verifyContext, verifyTabs)
-                            await continueAgentLoop(verifyMsg, buildMessageAttachments(verifyContext))
-                        } else {
-                            finishAgentLoop()
-                        }
-                    } else {
-                        finishAgentLoop()
-                    }
-                },
-                onError: (error) => {
-                    updateMessage(assistantId, error, false, true)
-                    finishAgentLoop()
+                    const retryContext = await gatherPageContext(true)
+                    const retryTabs = await gatherTabContext()
+                    const retryMessage = buildNativeToolFallbackMessage(fullResponse, retryContext, retryTabs)
+                    await continueAgentLoop(runId, retryMessage, buildMessageAttachments(retryContext))
+                    return
                 }
-            })
-        } catch (e) {
-            notifyAgentGroupState('error')
-            addSystemMessage(I18n.t('sys.loopError', { msg: e.message }))
-            finishAgentLoop()
-        }
+
+                if (actions.length === 0) {
+                    finishAgentLoop(runId)
+                    return
+                }
+
+                const execution = await executeAgentActions(runId, actions)
+                if (!runIsCurrent(runId)) return
+
+                if (execution.failedAction) {
+                    await new Promise(r => setTimeout(r, 400))
+                    const recoveryContext = await gatherPageContext(true)
+                    const recoveryTabs = await gatherTabContext()
+                    const recoveryMsg = buildRecoveryMessage(execution.failedAction, execution.failedResult, recoveryContext, recoveryTabs)
+                    await continueAgentLoop(runId, recoveryMsg, buildMessageAttachments(recoveryContext))
+                } else {
+                    await new Promise(r => setTimeout(r, 500))
+                    const verifyContext = await gatherPageContext(true)
+                    const verifyTabs = await gatherTabContext()
+                    const verifyMsg = buildVerifyMessage(execution.executedActions, verifyContext, verifyTabs)
+                    await continueAgentLoop(runId, verifyMsg, buildMessageAttachments(verifyContext))
+                }
+            },
+            onError: (error) => {
+                if (!runIsCurrent(runId)) return
+                updateMessage(assistantId, error, false, true)
+                finishAgentLoop(runId)
+            }
+        })
     }
 
-    function finishAgentLoop() {
-        notifyAgentGroupState('complete')
+    function finishAgentLoop(runId, groupStatus = 'complete') {
+        if (runId !== undefined && runId !== currentRunId) return
+        notifyAgentGroupState(groupStatus)
         isGenerating = false
         agentLoopRunning = false
         updateGeneratingUI()
@@ -495,17 +590,20 @@ const sidepanel = (() => {
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
             if (tab) {
-                await chrome.runtime.sendMessage({ type: 'AGENT_START_MONITORING', tabId: tab.id })
+                const res = await chrome.runtime.sendMessage({ type: 'AGENT_START_MONITORING', tabId: tab.id })
+                monitoredTabId = res && res.tabId ? res.tabId : tab.id
             }
         } catch (_) { }
     }
 
     async function stopMonitoring() {
+        // The tab the run started on, not whichever tab happens to be active now: the agent may
+        // have navigated elsewhere since.
+        const tabId = monitoredTabId
+        monitoredTabId = null
+        if (!tabId) return
         try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-            if (tab) {
-                await chrome.runtime.sendMessage({ type: 'AGENT_STOP_MONITORING', tabId: tab.id })
-            }
+            await chrome.runtime.sendMessage({ type: 'AGENT_STOP_MONITORING', tabId })
         } catch (_) { }
     }
 
@@ -516,7 +614,12 @@ const sidepanel = (() => {
         if (totalEl) totalEl.textContent = total
     }
 
-    async function gatherPageContext(includeAccessibilityTree = false) {
+    /** Sends to the content script of the active tab through the worker, which injects it if needed. */
+    async function sendTab(message) {
+        return await chrome.runtime.sendMessage(message)
+    }
+
+    async function gatherPageContext(includeAccessibilityTree = false, attachedScreenshot = null) {
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
             if (!tab || !tab.id) return { url: 'unknown', title: '', noPage: true }
@@ -534,17 +637,18 @@ const sidepanel = (() => {
 
             let structure = null
             let pageContent = null
-            let screenshot = pendingScreenshot || null
+            let screenshot = attachedScreenshot || null
 
             try {
-                const res = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_STRUCTURE' })
-                structure = res
+                const res = await sendTab({ type: 'GET_PAGE_STRUCTURE', tabId: tab.id })
+                if (res && res.success !== false) structure = res.structure || res
             } catch (_) { }
 
             if (includeAccessibilityTree) {
                 try {
-                    const res = await chrome.tabs.sendMessage(tab.id, {
+                    const res = await sendTab({
                         type: 'GET_PAGE_CONTENT',
+                        tabId: tab.id,
                         filter: 'interactive',
                         maxLength: 20000
                     })
@@ -555,7 +659,7 @@ const sidepanel = (() => {
 
                 if (!screenshot) {
                     try {
-                        const result = await chrome.runtime.sendMessage({ type: 'AGENT_TAKE_SCREENSHOT' })
+                        const result = await chrome.runtime.sendMessage({ type: 'AGENT_TAKE_SCREENSHOT', tabId: tab.id })
                         if (result && result.dataUrl) screenshot = result.dataUrl
                     } catch (_) { }
                 }
@@ -600,8 +704,9 @@ const sidepanel = (() => {
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
             if (tab && tab.id && tab.url && !tab.url.startsWith('chrome://')) {
-                await chrome.tabs.sendMessage(tab.id, {
+                await sendTab({
                     type: 'GET_PAGE_CONTENT',
+                    tabId: tab.id,
                     filter: 'interactive',
                     maxLength: 20000
                 })
@@ -780,31 +885,54 @@ const sidepanel = (() => {
         return parts.join('\n')
     }
 
+    /**
+     * An action the model emitted, checked before it is run: a known type, and a URL that is
+     * actually http(s) where one is required. Returns null for anything else.
+     */
+    function normalizeAction(raw) {
+        if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string') return null
+        if (!AutomationEngine.isKnownAction(raw.type)) return null
+        const action = { ...raw }
+        if (action.type === 'navigate' || action.type === 'new_tab' || action.type === 'tabs_create') {
+            if (action.url !== undefined && !/^https?:\/\//i.test(String(action.url))) return null
+        }
+        if (action.ref !== undefined) {
+            const ref = Number(action.ref)
+            if (!Number.isInteger(ref)) return null
+            action.ref = ref
+        }
+        if (action.targetTabId !== undefined) action.targetTabId = Number(action.targetTabId)
+        return action
+    }
+
+    /**
+     * Actions come in fenced ```action (or ```json) blocks. A bare object is accepted only when
+     * the whole reply is that object, so a sentence that merely quotes the format is not
+     * executed a second time.
+     */
     function extractActions(text) {
         const actions = []
+        const push = (parsed) => {
+            const list = Array.isArray(parsed) ? parsed : [parsed]
+            for (const item of list) {
+                const action = normalizeAction(item)
+                if (action) actions.push(action)
+            }
+        }
+
         const actionRegex = /```(?:action|json)\s*\n([\s\S]*?)```/g
         let match
-
         while ((match = actionRegex.exec(text)) !== null) {
             try {
-                const parsed = JSON.parse(match[1].trim())
-                if (parsed && parsed.type) {
-                    actions.push(parsed)
-                } else if (Array.isArray(parsed)) {
-                    parsed.forEach(a => { if (a && a.type) actions.push(a) })
-                }
+                push(JSON.parse(match[1].trim()))
             } catch (_) { }
         }
 
         if (actions.length === 0) {
-            const bareJsonRegex = /\{[^{}]*"type"\s*:\s*"[^"]+?"[^{}]*\}/g
-            let bareMatch
-            while ((bareMatch = bareJsonRegex.exec(text)) !== null) {
+            const trimmed = (text || '').trim()
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
                 try {
-                    const parsed = JSON.parse(bareMatch[0])
-                    if (parsed && parsed.type) {
-                        actions.push(parsed)
-                    }
+                    push(JSON.parse(trimmed))
                 } catch (_) { }
             }
         }
@@ -812,9 +940,10 @@ const sidepanel = (() => {
         return actions
     }
 
-    async function executeAgentActions(actions) {
+    async function executeAgentActions(runId, actions) {
         if (permissionManager.mode === 'plan' && actions.length > 0) {
             const planResult = await permissionManager.requestPlanApproval(actions)
+            if (!runIsCurrent(runId)) return { executedActions: [], failedAction: null, failedResult: null }
             if (!planResult || !planResult.approved) {
                 addSystemMessage(I18n.t('sys.planRejected'))
                 return { executedActions: [], failedAction: null, failedResult: null }
@@ -829,12 +958,13 @@ const sidepanel = (() => {
 
         for (let i = 0; i < actions.length; i++) {
             const action = actions[i]
-            if (!agentLoopRunning) break
+            if (!runIsCurrent(runId)) break
+            if (loopLimitReason()) break
 
             agentStepCount++
             updateStepCounter(agentStepCount, MAX_AGENT_STEPS)
 
-            const result = await executeAgentAction(action)
+            const result = await executeAgentAction(runId, action)
             executedActions.push(action)
 
             if (result?.error) {
@@ -858,10 +988,11 @@ const sidepanel = (() => {
         }
     }
 
-    async function executeAgentAction(action) {
+    async function executeAgentAction(runId, action) {
         showAgentBanner(I18n.t('sys.executing', { action: automationEngine.describeAction(action) }))
 
         const allowed = await permissionManager.checkPermission(action)
+        if (!runIsCurrent(runId)) return { success: false, error: I18n.t('sys.stopped') }
         if (!allowed || !allowed.approved) {
             if (allowed && allowed.timedOut) {
                 addSystemMessage(I18n.t('sys.approvalTimeout', { action: automationEngine.describeAction(action) }))
@@ -880,10 +1011,12 @@ const sidepanel = (() => {
         }
 
         for (let attempt = 1; attempt <= MAX_ACTION_RETRIES; attempt++) {
+            if (!runIsCurrent(runId)) return { success: false, error: I18n.t('sys.stopped') }
             try {
                 if (tab) {
-                    chrome.tabs.sendMessage(tab.id, {
+                    sendTab({
                         type: 'INDICATOR_SHOW',
+                        tabId: tab.id,
                         text: automationEngine.describeAction(action),
                         step: I18n.t('sys.stepIndicator', { step: agentStepCount }) + (MAX_ACTION_RETRIES > 1 ? ` · ${I18n.t('sys.attempt', { current: attempt, max: MAX_ACTION_RETRIES })}` : '')
                     }).catch(() => { })
@@ -893,8 +1026,9 @@ const sidepanel = (() => {
                 const shouldRetry = shouldRetryAction(action, result, attempt)
 
                 if (tab) {
-                    chrome.tabs.sendMessage(tab.id, {
+                    sendTab({
                         type: 'INDICATOR_TIMELINE',
+                        tabId: tab.id,
                         text: shouldRetry
                             ? `${automationEngine.describeAction(action)}${I18n.t('sys.retrying')}`
                             : automationEngine.describeAction(action),
@@ -916,6 +1050,7 @@ const sidepanel = (() => {
 
                 await recoverFailedAction(action, result, attempt)
             } catch (e) {
+                if (e && e.code === 'STOPPED') return { success: false, error: I18n.t('sys.stopped') }
                 const errorResult = { success: false, error: e.message }
                 const shouldRetry = shouldRetryAction(action, errorResult, attempt)
 
@@ -931,27 +1066,18 @@ const sidepanel = (() => {
 
         const finalResult = { success: false, error: I18n.t('sys.maxRetriesFailed') }
         notifyAgentGroupState('error')
-        addSystemMessage(finalResult.error + `：${automationEngine.describeAction(action)}`)
+        addSystemMessage(I18n.t('sys.maxRetriesFailedAction', { action: automationEngine.describeAction(action) }))
         return finalResult
     }
 
     function shouldRetryAction(action, result, attempt) {
         if (!result?.error) return false
         if (attempt >= MAX_ACTION_RETRIES) return false
+        if (!RETRYABLE_ACTION_TYPES.has(action.type)) return false
 
+        if (result.code && RETRYABLE_CODES.has(result.code)) return true
         const errorText = String(result.error || '')
-        const retryableErrors = [
-            I18n.t('ctx.elementNotFound'),
-            I18n.t('ctx.noResult'),
-            I18n.t('ctx.getPageTextFailed'),
-            'Receiving end does not exist',
-            'Could not establish connection',
-            'The message port closed before a response was received'
-        ]
-
-        const retryableActionTypes = ['click_ref', 'type_ref', 'hover_ref', 'read_page_content', 'find', 'get_page_text', 'execute_js', 'navigate', 'new_tab']
-
-        return retryableActionTypes.includes(action.type) && retryableErrors.some(fragment => errorText.includes(fragment))
+        return RETRYABLE_RUNTIME_ERRORS.some(fragment => errorText.includes(fragment))
     }
 
     async function recoverFailedAction(action, result, attempt) {
@@ -977,8 +1103,6 @@ const sidepanel = (() => {
     function updateTabCount() {
         const count = tabManager.getTabCount()
         const label = $('#sp-tab-count')
-        // English needs the singular; Chinese does not distinguish, and its entry is the
-        // same string, so the branch costs nothing there.
         if (label)
             label.textContent = count === 1
                 ? I18n.t('agent.tabCount.one')
@@ -1018,6 +1142,7 @@ const sidepanel = (() => {
         return false
     }
 
+    // Developer commands below stay in English: they are diagnostics, not product copy.
     async function runVisionTest() {
         addSystemMessage('===== Vision check starting =====')
 
@@ -1035,29 +1160,6 @@ const sidepanel = (() => {
 
         addSystemMessage(`[inputs] number=${testNumber}, colour=${expectedColor}(${colorHex})`)
 
-        const injectScript = `
-            (function() {
-                const c = document.createElement('canvas');
-                c.id = '__vision_test__';
-                c.width = 800; c.height = 400;
-                c.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;border:3px solid #fff;box-shadow:0 0 40px rgba(0,0,0,0.8);';
-                document.body.appendChild(c);
-                const ctx = c.getContext('2d');
-                ctx.fillStyle = '#111';
-                ctx.fillRect(0, 0, 800, 400);
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold 140px monospace';
-                ctx.textAlign = 'center';
-                ctx.fillText('${testNumber}', 400, 180);
-                ctx.fillStyle = '${colorHex}';
-                ctx.fillRect(280, 240, 240, 80);
-                ctx.fillStyle = '#000';
-                ctx.font = 'bold 36px sans-serif';
-                ctx.fillText('TEST', 400, 292);
-                return 'injected';
-            })()
-        `
-
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
             if (!tab || !tab.id) {
@@ -1065,15 +1167,37 @@ const sidepanel = (() => {
                 return
             }
 
-            const injectResult = await chrome.scripting.executeScript({
+            // A real function with arguments: `new Function` is refused by the extension CSP.
+            await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                func: new Function('return ' + injectScript)
+                func: (number, hex) => {
+                    const c = document.createElement('canvas')
+                    c.id = '__vision_test__'
+                    c.width = 800
+                    c.height = 400
+                    c.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;border:3px solid #fff;box-shadow:0 0 40px rgba(0,0,0,0.8);'
+                    document.body.appendChild(c)
+                    const ctx = c.getContext('2d')
+                    ctx.fillStyle = '#111'
+                    ctx.fillRect(0, 0, 800, 400)
+                    ctx.fillStyle = '#fff'
+                    ctx.font = 'bold 140px monospace'
+                    ctx.textAlign = 'center'
+                    ctx.fillText(number, 400, 180)
+                    ctx.fillStyle = hex
+                    ctx.fillRect(280, 240, 240, 80)
+                    ctx.fillStyle = '#000'
+                    ctx.font = 'bold 36px sans-serif'
+                    ctx.fillText('TEST', 400, 292)
+                    return 'injected'
+                },
+                args: [testNumber, colorHex]
             })
             addSystemMessage('[step 1] Test canvas injected into the page.')
 
             await new Promise(r => setTimeout(r, 500))
 
-            const ssResult = await chrome.runtime.sendMessage({ type: 'AGENT_TAKE_SCREENSHOT' })
+            const ssResult = await chrome.runtime.sendMessage({ type: 'AGENT_TAKE_SCREENSHOT', tabId: tab.id })
             if (!ssResult || !ssResult.dataUrl) {
                 addSystemMessage('[failed] Could not capture a screenshot.')
                 return
@@ -1169,9 +1293,9 @@ const sidepanel = (() => {
         lines.push(`pending screenshot: ${pendingScreenshot ? 'yes (' + Math.round(pendingScreenshot.length * 0.75 / 1024) + 'KB)' : 'none'}`)
         lines.push(`messages: ${messages.length}`)
         lines.push(`history entries: ${conversationHistory.length}`)
-        lines.push(`agent steps: ${agentStepCount}/${MAX_AGENT_STEPS}`)
+        lines.push(`agent steps: ${agentStepCount}/${MAX_AGENT_STEPS}, model rounds: ${llmRoundCount}`)
         lines.push(`generating: ${isGenerating ? 'yes' : 'no'}`)
-        lines.push(`agent loop: ${agentLoopRunning ? 'running' : 'idle'}`)
+        lines.push(`agent loop: ${agentLoopRunning ? 'running' : 'idle'} (run #${currentRunId})`)
         lines.push('---')
         lines.push('attachment pipeline: gatherPageContext -> buildMessageAttachments -> dataUrlToAttachment -> chat.send.attachments')
         lines.push('Logs: open DevTools Console and filter on [ChatService][attachments] for per-message attachment counts')
@@ -1192,13 +1316,21 @@ const sidepanel = (() => {
         }
     }
 
+    // ---- messages ---------------------------------------------------------------------------
+
+    function newMessageId() {
+        return 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
+    }
+
     function addMessage(role, content, isStreaming = false) {
-        const id = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
-        const msg = { id, role, content, isStreaming, isError: false, timestamp: Date.now() }
+        const id = newMessageId()
+        const hist = { role, content }
+        const msg = { id, role, content, isStreaming, isError: false, timestamp: Date.now(), _histRef: hist }
         messages.push(msg)
-        conversationHistory.push({ role, content })
-        renderMessages()
+        conversationHistory.push(hist)
+        renderMessages(id)
         scrollToBottom()
+        if (!isStreaming) persistMessages()
         return id
     }
 
@@ -1210,86 +1342,134 @@ const sidepanel = (() => {
     }
 
     function addSystemMessage(text) {
-        const id = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
+        const id = newMessageId()
         messages.push({ id, role: 'system', content: text, isStreaming: false, isError: false, timestamp: Date.now() })
-        renderMessages()
+        renderMessages(id)
         scrollToBottom()
     }
 
     function updateMessage(id, content, isStreaming, isError = false) {
         const msg = messages.find(m => m.id === id)
-        if (msg) {
-            msg.content = content
-            msg.isStreaming = isStreaming
-            msg.isError = isError
-            if (!isStreaming) {
-                const histEntry = conversationHistory.find(h => h === msg._histRef)
-                if (histEntry) histEntry.content = content
-            }
-            renderMessages()
-            scrollToBottom()
-        }
+        if (!msg) return
+        msg.content = content
+        msg.isStreaming = isStreaming
+        msg.isError = isError
+        // The history entry is the object pushed in addMessage; it was never linked before, so
+        // the model saw its own earlier replies as empty.
+        if (msg._histRef) msg._histRef.content = content
+        renderMessages(id)
+        scrollToBottom()
+        if (!isStreaming) persistMessages()
     }
 
-    function renderMessages() {
+    let persistTimer = null
+    function persistMessages() {
+        if (!activeClaw) return
+        const clawId = activeClaw.id
+        clearTimeout(persistTimer)
+        persistTimer = setTimeout(() => {
+            const saved = messages
+                .filter(m => (m.role === 'user' || m.role === 'assistant') && !m.isStreaming)
+                .slice(-MAX_SAVED_MESSAGES)
+                .map(m => ({ id: m.id, role: m.role, content: m.content, isError: m.isError, timestamp: m.timestamp }))
+            chrome.storage.local.set({ [HISTORY_KEY_PREFIX + clawId]: saved }).catch(() => { })
+        }, 300)
+    }
+
+    async function restoreMessages(clawId) {
+        let saved = []
+        try {
+            const stored = await chrome.storage.local.get(HISTORY_KEY_PREFIX + clawId)
+            saved = stored[HISTORY_KEY_PREFIX + clawId] || []
+        } catch (_) { }
+        messages = saved.map(m => {
+            const hist = { role: m.role, content: m.content }
+            return { ...m, isStreaming: false, _histRef: hist }
+        })
+        conversationHistory = messages.map(m => m._histRef)
+        renderMessages()
+        scrollToBottom()
+    }
+
+    // What each message element was last drawn from, so a streaming delta re-renders one node
+    // instead of every message in the conversation.
+    const renderedSignature = new Map()
+
+    function renderMessages(onlyId = null) {
         const container = $('#sp-messages')
         const emptyState = $('#sp-empty-state')
 
         if (messages.length === 0) {
+            container.querySelectorAll('.sp-msg').forEach(el => el.remove())
+            renderedSignature.clear()
             emptyState.classList.remove('hidden')
             return
         }
 
         emptyState.classList.add('hidden')
 
-        messages.forEach(msg => {
-            let el = container.querySelector(`[data-id="${msg.id}"]`)
-            if (!el) {
-                el = document.createElement('div')
-                el.className = `sp-msg sp-msg-${msg.role}`
-                el.dataset.id = msg.id
-                container.insertBefore(el, emptyState)
-            }
-
-            if (msg.role === 'system') {
-                el.innerHTML = `<div class="sp-msg-system"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-4,48a12,12,0,1,1-12,12A12,12,0,0,1,124,72Zm12,112a16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40a8,8,0,0,1,0,16Z"/></svg><span>${escapeHtml(msg.content)}</span></div>`
-            } else if (msg.role === 'user') {
-                el.innerHTML = `<div class="sp-msg-content sp-msg-user-content">${escapeHtml(msg.content)}</div>`
-            } else {
-                let content = msg.content
-                if (msg.isError) {
-                    el.innerHTML = `<div class="sp-msg-content sp-msg-error-content"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M236.8,188.09,149.35,36.22a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM120,104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm8,88a12,12,0,1,1,12-12A12,12,0,0,1,128,192Z"/></svg><span>${escapeHtml(content)}</span></div>`
-                } else if (msg.isStreaming && !content) {
-                    el.innerHTML = `<div class="sp-msg-content sp-msg-ai-content"><div class="sp-typing-indicator"><div class="sp-typing-dot"></div><div class="sp-typing-dot"></div><div class="sp-typing-dot"></div></div></div>`
-                } else {
-                    const rendered = formatMarkdown(content)
-                    const shimmer = msg.isStreaming ? ' sp-streaming' : ''
-                    const actions = msg.isStreaming ? '' : `<div class="sp-msg-actions"><button class="sp-msg-action-btn" onclick="sidepanel.copyMessage(this)" title="Copy"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button></div>`
-                    el.innerHTML = `<div class="sp-msg-content sp-msg-ai-content${shimmer}">${rendered}</div>${actions}`
+        if (!onlyId) {
+            const ids = new Set(messages.map(m => m.id))
+            container.querySelectorAll('.sp-msg').forEach(el => {
+                if (!ids.has(el.dataset.id)) {
+                    el.remove()
+                    renderedSignature.delete(el.dataset.id)
                 }
-            }
-        })
+            })
+        }
 
-        bindCodeCopyButtons()
+        const targets = onlyId ? messages.filter(m => m.id === onlyId) : messages
+        targets.forEach(msg => renderOneMessage(container, emptyState, msg))
     }
 
-    function bindCodeCopyButtons() {
-        document.querySelectorAll('.sp-code-copy-btn').forEach(btn => {
-            if (btn.dataset.bound) return
-            btn.dataset.bound = '1'
-            btn.addEventListener('click', () => {
-                const block = btn.closest('.sp-code-block')
-                const code = block.querySelector('code').textContent
-                navigator.clipboard.writeText(code).then(() => {
-                    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>'
-                    btn.classList.add('copied')
-                    setTimeout(() => {
-                        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>'
-                        btn.classList.remove('copied')
-                    }, 2000)
-                })
-            })
-        })
+    function renderOneMessage(container, emptyState, msg) {
+        const signature = `${msg.role}|${msg.isStreaming ? 1 : 0}|${msg.isError ? 1 : 0}|${msg.content}`
+        let el = container.querySelector(`[data-id="${msg.id}"]`)
+        if (el && renderedSignature.get(msg.id) === signature) return
+        if (!el) {
+            el = document.createElement('div')
+            el.className = `sp-msg sp-msg-${msg.role}`
+            el.dataset.id = msg.id
+            container.insertBefore(el, emptyState)
+        }
+        renderedSignature.set(msg.id, signature)
+
+        if (msg.role === 'system') {
+            el.innerHTML = `<div class="sp-msg-system"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-4,48a12,12,0,1,1-12,12A12,12,0,0,1,124,72Zm12,112a16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40a8,8,0,0,1,0,16Z"/></svg><span>${escapeHtml(msg.content)}</span></div>`
+        } else if (msg.role === 'user') {
+            el.innerHTML = `<div class="sp-msg-content sp-msg-user-content">${escapeHtml(msg.content)}</div>`
+        } else {
+            const content = msg.content
+            if (msg.isError) {
+                el.innerHTML = `<div class="sp-msg-content sp-msg-error-content"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M236.8,188.09,149.35,36.22a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM120,104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm8,88a12,12,0,1,1,12-12A12,12,0,0,1,128,192Z"/></svg><span>${escapeHtml(content)}</span></div>`
+            } else if (msg.isStreaming && !content) {
+                el.innerHTML = `<div class="sp-msg-content sp-msg-ai-content"><div class="sp-typing-indicator"><div class="sp-typing-dot"></div><div class="sp-typing-dot"></div><div class="sp-typing-dot"></div></div></div>`
+            } else {
+                const rendered = formatMarkdown(content)
+                const shimmer = msg.isStreaming ? ' sp-streaming' : ''
+                const actions = msg.isStreaming ? '' : `<div class="sp-msg-actions"><button type="button" class="sp-msg-action-btn" title="${escapeHtml(I18n.t('msg.copy'))}" aria-label="${escapeHtml(I18n.t('msg.copy'))}">${COPY_ICON}</button></div>`
+                el.innerHTML = `<div class="sp-msg-content sp-msg-ai-content${shimmer}">${rendered}</div>${actions}`
+            }
+        }
+    }
+
+    const COPY_ICON = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>'
+    const COPIED_ICON = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>'
+
+    function flashCopied(btn) {
+        btn.innerHTML = COPIED_ICON
+        btn.classList.add('copied')
+        setTimeout(() => {
+            btn.innerHTML = COPY_ICON
+            btn.classList.remove('copied')
+        }, 2000)
+    }
+
+    function copyCodeBlock(btn) {
+        const block = btn.closest('.sp-code-block')
+        const code = block ? block.querySelector('code')?.textContent : ''
+        if (!code) return
+        navigator.clipboard.writeText(code).then(() => flashCopied(btn)).catch(() => { })
     }
 
     function scrollToBottom() {
@@ -1303,16 +1483,18 @@ const sidepanel = (() => {
         const sendBtn = $('#sp-btn-send')
         if (isGenerating) {
             sendBtn.classList.add('generating')
-            sendBtn.title = 'Stop generating'
+            sendBtn.title = I18n.t('agent.stop.title')
+            sendBtn.setAttribute('aria-label', I18n.t('agent.stop.title'))
         } else {
             sendBtn.classList.remove('generating')
-            sendBtn.title = 'Send'
+            sendBtn.title = I18n.t('input.send')
+            sendBtn.setAttribute('aria-label', I18n.t('input.send'))
         }
     }
 
     function showAgentBanner(text) {
         const banner = $('#sp-agent-banner')
-        $('#sp-agent-status-text').textContent = text || 'Agent working...'
+        $('#sp-agent-status-text').textContent = text || I18n.t('agent.working')
         banner.classList.remove('hidden')
     }
 
@@ -1321,8 +1503,10 @@ const sidepanel = (() => {
     }
 
     function handleStopAgent() {
+        currentRunId++
         automationEngine.stop()
         agentLoopRunning = false
+        permissionManager.cancelPending()
         if (chatService && sessionKey) {
             chatService.abortChat(sessionKey, '')
         }
@@ -1331,14 +1515,21 @@ const sidepanel = (() => {
         updateGeneratingUI()
         hideAgentBanner()
         stopMonitoring()
+        // A reply that was still streaming stays on screen as it was; it is no longer "live".
+        messages.forEach(m => { if (m.isStreaming) { m.isStreaming = false; renderMessages(m.id) } })
         addSystemMessage(I18n.t('sys.stopped'))
     }
 
     function handleNewChat() {
+        currentRunId++
+        automationEngine.stop()
+        permissionManager.cancelPending()
+        agentLoopRunning = false
         messages = []
         conversationHistory = []
         isGenerating = false
         pendingScreenshot = null
+        hideApprovalOverlays()
 
         if (chatService) {
             chatService.disconnect()
@@ -1348,11 +1539,13 @@ const sidepanel = (() => {
 
         if (activeClaw) {
             chatService = new ChatService(activeClaw.gatewayUrl, activeClaw.gatewayToken)
+            chrome.storage.local.remove(HISTORY_KEY_PREFIX + activeClaw.id).catch(() => { })
         }
 
         renderMessages()
         updateGeneratingUI()
         hideAgentBanner()
+        stopMonitoring()
     }
 
     async function handleScreenshot() {
@@ -1372,13 +1565,15 @@ const sidepanel = (() => {
     async function handleToggleRecord() {
         const btn = $('#sp-btn-record')
         if (isRecording) {
-            const workflow = await workflowRecorder.stop()
             isRecording = false
+            const workflow = await workflowRecorder.stop()
             btn.classList.remove('recording')
+            btn.setAttribute('aria-pressed', 'false')
 
             if (workflow && workflow.actions.length > 0) {
                 const prompt = workflowRecorder.toPrompt()
                 $('#sp-input').value = prompt
+                autoResizeInput()
                 addSystemMessage(I18n.t('sys.recorded', { count: workflow.actions.length, time: workflowRecorder.getFormattedElapsed() }))
             } else {
                 addSystemMessage(I18n.t('sys.noRecording'))
@@ -1393,6 +1588,7 @@ const sidepanel = (() => {
                 await workflowRecorder.start(tab.id)
                 isRecording = true
                 btn.classList.add('recording')
+                btn.setAttribute('aria-pressed', 'true')
                 addSystemMessage(I18n.t('sys.recordingStarted'))
             } catch (e) {
                 addSystemMessage(I18n.t('sys.recordError', { msg: e.message }))
@@ -1400,6 +1596,10 @@ const sidepanel = (() => {
         }
     }
 
+    /**
+     * Saves the conversation as JSON. Done here, in the page: the service worker has no
+     * URL.createObjectURL, which is why this used to fail every time.
+     */
     async function handleExport() {
         if (messages.length === 0) {
             addSystemMessage(I18n.t('sys.noExportContent'))
@@ -1417,22 +1617,33 @@ const sidepanel = (() => {
             }))
         }
 
+        let url = null
         try {
-            await chrome.runtime.sendMessage({
-                type: 'EXPORT_CONVERSATION',
-                data
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+            url = URL.createObjectURL(blob)
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+            await chrome.downloads.download({
+                url,
+                filename: `agentaura-conversation-${stamp}.json`,
+                saveAs: true
             })
             addSystemMessage(I18n.t('sys.exported'))
         } catch (e) {
             addSystemMessage(I18n.t('sys.exportError', { msg: e.message }))
+        } finally {
+            // The download has the blob by now; give the dialog a moment before revoking.
+            if (url) setTimeout(() => URL.revokeObjectURL(url), 60000)
         }
     }
+
+    // ---- shortcuts --------------------------------------------------------------------------
 
     function toggleShortcutsPanel() {
         const panel = $('#sp-shortcuts-panel')
         panel.classList.toggle('hidden')
         if (!panel.classList.contains('hidden')) {
             renderShortcutsList()
+            $('#sp-shortcuts-search').focus()
         }
     }
 
@@ -1442,15 +1653,15 @@ const sidepanel = (() => {
         const list = $('#sp-shortcuts-list')
 
         if (shortcuts.length === 0) {
-            list.innerHTML = '<div class="sp-shortcuts-empty">No shortcuts yet</div>'
+            list.innerHTML = `<div class="sp-shortcuts-empty">${escapeHtml(I18n.t('shortcuts.empty'))}</div>`
             return
         }
 
         list.innerHTML = shortcuts.map(s => `
-            <div class="sp-shortcut-item" data-id="${s.id}">
+            <button type="button" class="sp-shortcut-item" data-id="${escapeHtml(s.id)}">
                 <div class="sp-shortcut-name">${escapeHtml(s.name)}</div>
                 <div class="sp-shortcut-text">${escapeHtml(s.text)}</div>
-            </div>
+            </button>
         `).join('')
 
         list.querySelectorAll('.sp-shortcut-item').forEach(el => {
@@ -1458,7 +1669,8 @@ const sidepanel = (() => {
                 const shortcut = shortcuts.find(s => s.id === el.dataset.id)
                 if (shortcut) {
                     $('#sp-input').value = shortcut.text
-                    shortcutsManager.incrementUse(shortcut.id)
+                    autoResizeInput()
+                    shortcutsManager.incrementUse(shortcut.id).catch(() => { })
                     toggleShortcutsPanel()
                     $('#sp-input').focus()
                 }
@@ -1466,7 +1678,7 @@ const sidepanel = (() => {
         })
     }
 
-    function handleAddShortcut() {
+    async function handleAddShortcut() {
         const input = $('#sp-input')
         const text = input.value.trim()
 
@@ -1476,10 +1688,13 @@ const sidepanel = (() => {
         }
 
         const name = text.length > 40 ? text.substring(0, 40) + '...' : text
-        shortcutsManager.add(name, text)
+        // add(text, name): the full prompt is the text, the clipped one is only the label.
+        await shortcutsManager.add(text, name)
         renderShortcutsList()
         addSystemMessage(I18n.t('sys.shortcutSaved'))
     }
+
+    // ---- scheduled tasks --------------------------------------------------------------------
 
     function toggleSchedulePanel() {
         const panel = $('#sp-schedule-panel')
@@ -1497,23 +1712,24 @@ const sidepanel = (() => {
 
         const tasks = taskScheduler.getAll()
         if (tasks.length === 0) {
-            list.innerHTML = '<div class="sp-shortcuts-empty">' + I18n.t('sys.noScheduledTasks') + '</div>'
+            list.innerHTML = '<div class="sp-shortcuts-empty">' + escapeHtml(I18n.t('sys.noScheduledTasks')) + '</div>'
             return
         }
 
+        const locale = I18n.getLang() === 'zh' ? 'zh-CN' : undefined
         list.innerHTML = tasks.map(t => `
-            <div class="sp-shortcut-item sp-schedule-item" data-id="${t.id}">
+            <div class="sp-shortcut-item sp-schedule-item" data-id="${escapeHtml(t.id)}">
                 <div class="sp-schedule-row">
                     <div class="sp-shortcut-name">${escapeHtml(t.name)}</div>
                     <div class="sp-schedule-actions">
-                        <button class="sp-schedule-toggle ${t.enabled ? 'enabled' : ''}" data-toggle="${t.id}" title="${t.enabled ? I18n.t('sys.enabled') : I18n.t('sys.disabled')}">
+                        <button type="button" class="sp-schedule-toggle ${t.enabled ? 'enabled' : ''}" data-toggle="${escapeHtml(t.id)}" aria-pressed="${t.enabled ? 'true' : 'false'}" title="${escapeHtml(t.enabled ? I18n.t('sys.enabled') : I18n.t('sys.disabled'))}" aria-label="${escapeHtml(t.enabled ? I18n.t('sys.enabled') : I18n.t('sys.disabled'))}">
                             ${t.enabled ? '✓' : '✗'}
                         </button>
-                        <button class="sp-schedule-delete" data-delete="${t.id}" title="${I18n.t('sys.delete')}">✕</button>
+                        <button type="button" class="sp-schedule-delete" data-delete="${escapeHtml(t.id)}" title="${escapeHtml(I18n.t('sys.delete'))}" aria-label="${escapeHtml(I18n.t('sys.delete'))}">✕</button>
                     </div>
                 </div>
-                <div class="sp-shortcut-text">${escapeHtml(t.prompt.substring(0, 60))}</div>
-                <div class="sp-schedule-meta">${I18n.t('sys.everyNMin', { n: t.intervalMinutes })} · ${I18n.t('sys.ranCount', { count: t.runCount || 0 })}${t.lastRun ? ' · ' + I18n.t('sys.lastRun') + new Date(t.lastRun).toLocaleString(I18n.getLang() === 'zh' ? 'zh-CN' : 'en-US') : ''}</div>
+                <div class="sp-shortcut-text">${escapeHtml((t.prompt || '').substring(0, 60))}</div>
+                <div class="sp-schedule-meta">${escapeHtml(I18n.t('sys.everyNMin', { n: t.intervalMinutes }))} · ${escapeHtml(I18n.t('sys.ranCount', { count: t.runCount || 0 }))}${t.lastRun ? ' · ' + escapeHtml(I18n.t('sys.lastRun')) + escapeHtml(new Date(t.lastRun).toLocaleString(locale)) : ''}</div>
             </div>
         `).join('')
 
@@ -1540,14 +1756,23 @@ const sidepanel = (() => {
         if (!promptInput || !intervalInput) return
 
         const prompt = promptInput.value.trim()
-        const interval = parseInt(intervalInput.value) || 60
+        const interval = TaskScheduler.normalizeInterval(intervalInput.value)
 
         if (!prompt) {
             addSystemMessage(I18n.t('sys.enterTaskPrompt'))
             return
         }
+        if (!interval) {
+            addSystemMessage(I18n.t('sys.invalidInterval'))
+            return
+        }
 
-        await taskScheduler.add(prompt, interval)
+        try {
+            await taskScheduler.add(prompt, interval)
+        } catch (e) {
+            addSystemMessage(I18n.t('sys.taskAddFailed', { msg: e.message }))
+            return
+        }
         promptInput.value = ''
         intervalInput.value = '60'
         renderScheduledTasks()
@@ -1563,26 +1788,36 @@ const sidepanel = (() => {
             }
         }
 
+        // A run may already be going; wait for it rather than dropping the task on the floor.
+        if (isGenerating) {
+            addSystemMessage(I18n.t('sys.taskQueued', { name: task.name }))
+            const deadline = Date.now() + 2 * 60 * 1000
+            while (isGenerating && Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, 1000))
+            }
+            if (isGenerating) {
+                addSystemMessage(I18n.t('sys.taskSkippedBusy', { name: task.name }))
+                return
+            }
+        }
+
         addSystemMessage(I18n.t('sys.taskExecuting', { name: task.name }))
         $('#sp-input').value = task.prompt
         await handleSend()
     }
+
+    // ---- approvals --------------------------------------------------------------------------
+
+    let lastFocusBeforeOverlay = null
 
     function showActionApproval(action) {
         notifyAgentGroupState('approval')
         const overlay = $('#sp-approval-overlay')
         $('#sp-approval-type').textContent = action.type
         $('#sp-approval-desc').textContent = automationEngine.describeAction(action)
+        lastFocusBeforeOverlay = document.activeElement
         overlay.classList.remove('hidden')
-
-        const hideOverlay = () => overlay.classList.add('hidden')
-        const origApprove = permissionManager.approve.bind(permissionManager)
-        const origDeny = permissionManager.deny.bind(permissionManager)
-        const origApproveAll = permissionManager.approveAll.bind(permissionManager)
-
-        permissionManager.approve = () => { hideOverlay(); origApprove() }
-        permissionManager.deny = () => { hideOverlay(); origDeny() }
-        permissionManager.approveAll = () => { hideOverlay(); origApproveAll() }
+        $('#sp-btn-approve').focus()
     }
 
     function showPlanApproval(plan) {
@@ -1597,15 +1832,22 @@ const sidepanel = (() => {
             </div>
         `).join('')
 
+        lastFocusBeforeOverlay = document.activeElement
         overlay.classList.remove('hidden')
-
-        const hideOverlay = () => overlay.classList.add('hidden')
-        const origApprovePlan = permissionManager.approvePlanExecution.bind(permissionManager)
-        const origRejectPlan = permissionManager.rejectPlan.bind(permissionManager)
-
-        permissionManager.approvePlanExecution = () => { hideOverlay(); origApprovePlan() }
-        permissionManager.rejectPlan = () => { hideOverlay(); origRejectPlan() }
+        $('#sp-btn-approve-plan').focus()
     }
+
+    /** Whatever settled the approval (button, Escape, timeout, Stop), the overlays close. */
+    function hideApprovalOverlays() {
+        $('#sp-approval-overlay').classList.add('hidden')
+        $('#sp-plan-overlay').classList.add('hidden')
+        if (lastFocusBeforeOverlay && typeof lastFocusBeforeOverlay.focus === 'function') {
+            try { lastFocusBeforeOverlay.focus() } catch (_) { }
+        }
+        lastFocusBeforeOverlay = null
+    }
+
+    // ---- markdown ---------------------------------------------------------------------------
 
     function formatMarkdown(text) {
         if (!text) return ''
@@ -1638,7 +1880,12 @@ const sidepanel = (() => {
 
         html = html.replace(/^---$/gm, '<hr class="sp-md-hr">')
 
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+        // The href was escaped with the rest of the text; unescape it to check the scheme, then
+        // let only http(s) through. `javascript:` and friends become '#'.
+        html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, href) => {
+            const safe = sanitizeUrl(href.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"'))
+            return `<a href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+        })
 
         html = html.replace(/(^|\n)((?:- .+(?:\n|$))+)/g, (_, before, block) => {
             const items = block.trim().split('\n').map(l => `<li>${l.replace(/^- /, '')}</li>`).join('')
@@ -1650,41 +1897,30 @@ const sidepanel = (() => {
             return `${before}<ol class="sp-md-list">${items}</ol>`
         })
 
+        // Replacement passed as a function: a `$&` or `$'` inside the code would otherwise be
+        // read as a replacement pattern and splice surrounding text into the code block.
         codeBlocks.forEach((block, idx) => {
             const langLabel = block.lang ? `<span class="sp-code-lang">${escapeHtml(block.lang)}</span>` : ''
-            const copyBtn = `<button class="sp-code-copy-btn" title="Copy"><svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg></button>`
+            const copyBtn = `<button type="button" class="sp-code-copy-btn" title="${escapeHtml(I18n.t('msg.copy'))}" aria-label="${escapeHtml(I18n.t('msg.copy'))}">${COPY_ICON}</button>`
             const replacement = `<div class="sp-code-block"><div class="sp-code-header">${langLabel}${copyBtn}</div><pre><code>${escapeHtml(block.code)}</code></pre></div>`
-            html = html.replace(`\x00CODEBLOCK_${idx}\x00`, replacement)
+            html = html.replace(`\x00CODEBLOCK_${idx}\x00`, () => replacement)
         })
 
         inlineCodes.forEach((code, idx) => {
-            html = html.replace(`\x00INLINE_${idx}\x00`, `<code class="sp-inline-code">${escapeHtml(code)}</code>`)
+            html = html.replace(`\x00INLINE_${idx}\x00`, () => `<code class="sp-inline-code">${escapeHtml(code)}</code>`)
         })
 
         html = html.replace(/\n\n/g, '</p><p>')
         html = html.replace(/\n/g, '<br>')
 
-        return html
+        return `<p>${html}</p>`
     }
 
     function copyMessageText(btn) {
         const msgEl = btn.closest('.sp-msg')
-        const msg = messages.find(m => m.id === msgEl.dataset.id)
+        const msg = msgEl ? messages.find(m => m.id === msgEl.dataset.id) : null
         if (!msg) return
-        navigator.clipboard.writeText(msg.content).then(() => {
-            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg>'
-            btn.classList.add('copied')
-            setTimeout(() => {
-                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>'
-                btn.classList.remove('copied')
-            }, 2000)
-        })
-    }
-
-    function escapeHtml(str) {
-        const div = document.createElement('div')
-        div.textContent = String(str || '')
-        return div.innerHTML
+        navigator.clipboard.writeText(msg.content).then(() => flashCopied(btn)).catch(() => { })
     }
 
     return { init, copyMessage: copyMessageText }
