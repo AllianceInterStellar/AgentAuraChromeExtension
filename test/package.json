@@ -1,11 +1,12 @@
 {
   "name": "agentaura-chrome-extension-tests",
-  "version": "3.0.0",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Integration tests that drive a real Chrome with the extension loaded against a live agent gateway.",
+  "description": "Unit tests for the extension (no network, no credentials) and integration scripts that drive a real Chrome against a live agent gateway.",
   "license": "MIT",
   "scripts": {
+    "test": "node --test *.test.mjs",
     "agent-loop": "node e2e-agent-loop.mjs",
     "browser-automation": "node e2e-browser-automation.mjs",
     "comprehensive": "node e2e-comprehensive.mjs",

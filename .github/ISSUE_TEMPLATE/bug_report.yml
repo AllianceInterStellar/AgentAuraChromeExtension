@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in the extension does not do what it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Reproducible bugs are better here than on Discord because they stay searchable.
+        If this is a security problem, please read [SECURITY.md](../blob/main/SECURITY.md) first and do not post exploit details.
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      description: Shown on the extension's card at `chrome://extensions`.
+      placeholder: 3.0.2
+    validations:
+      required: true
+  - type: input
+    id: chrome
+    attributes:
+      label: Chrome version and OS
+      placeholder: Chrome 140.0.7339.80, macOS 15.6
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it installed?
+      options:
+        - Chrome Web Store
+        - Load unpacked (from a clone or a release zip)
+        - scripts/dev-install.mjs
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, what you expected, what happened. A page URL helps if it is public.
+      placeholder: |
+        1. Open the side panel on https://example.com
+        2. Ask the agent to ...
+        3. It shows "..." / nothing happens
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output
+      description: >-
+        From the side panel (right-click → Inspect → Console) or the service worker
+        ("Inspect views: service worker" at `chrome://extensions`). Remove anything that looks like a token.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed gateway tokens, session cookies and anything else that is a credential from the report.
+          required: true

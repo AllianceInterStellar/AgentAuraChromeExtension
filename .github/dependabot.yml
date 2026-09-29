@@ -1,0 +1,21 @@
+# Weekly update PRs for the two places that pin third-party versions. The Playwright version
+# the workflows install (PLAYWRIGHT_VERSION in check.yml and release.yml) is a plain string
+# Dependabot does not see; bump it by hand when the npm PR for test/ moves playwright.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /test
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      test-dependencies:
+        patterns: ['*']

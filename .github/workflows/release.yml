@@ -8,10 +8,30 @@ on:
 permissions:
   contents: write
 
+# Two releases of the same ref must not race each other, and a release that is half way
+# through publishing must not be cancelled by a second one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The version check.yml installs as well; part of the browser cache key.
+  PLAYWRIGHT_VERSION: 1.58.2
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # A manual run from a branch would package whatever is on it and publish a release with
+      # no tag to point at. Refuse it up front, with the fix in the message.
+      - name: Must run on a tag
+        if: github.ref_type != 'tag'
+        run: |
+          echo "::error::Release only runs from a v* tag, and this run is on ${GITHUB_REF_TYPE} '${GITHUB_REF_NAME}'. Push a tag (git tag v1.2.3 && git push origin v1.2.3), or in Actions → Release → Run workflow choose the tag under 'Use workflow from'."
+          exit 1
+
+      # TODO: pin every `uses:` to a commit SHA (`actions/checkout@<sha> # v4`) once the SHAs
+      # can be verified against the upstream repositories; a tag can be moved, a SHA cannot.
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -25,12 +45,10 @@ jobs:
           version=$(node -p "require('./manifest.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Manifest version: $version"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            tag_version="${GITHUB_REF_NAME#v}"
-            if [ "$tag_version" != "$version" ]; then
-              echo "::error::tag ${GITHUB_REF_NAME} does not match manifest version $version"
-              exit 1
-            fi
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$tag_version" != "$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match manifest version $version"
+            exit 1
           fi
 
       # Only what the browser actually loads. The test scripts and CI config have no business
@@ -57,7 +75,7 @@ jobs:
           mkdir -p "$out" && unzip -q "$name" -d "$out"
 
           fail=0
-          for forbidden in test .github README.md .gitignore; do
+          for forbidden in test scripts .github README.md .gitignore node_modules; do
             if [ -e "$out/$forbidden" ]; then
               echo "::error::$forbidden was packaged"; fail=1
             fi
@@ -86,57 +104,32 @@ jobs:
           " "$out"
           exit $fail
 
+      # TODO pin: actions/cache@<sha> # v4
+      - name: Cache the Playwright browser
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ env.PLAYWRIGHT_VERSION }}-${{ runner.os }}-chromium
+
       # The strongest check available without a human: give the unpacked package to a real
-      # Chrome and see whether the service worker comes up. A manifest can be valid, every
-      # referenced file can be present, and the extension can still fail to register.
-      - name: Load the package in Chrome
+      # Chrome and see whether the service worker comes up and the side panel opens. The
+      # script lives in scripts/ (outside the package) and is shared with check.yml; playwright
+      # is installed in the repository root, where Node resolves it from.
+      - name: Install Playwright and a display
         run: |
-          npm install --no-save playwright@1.58.2
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock "playwright@${PLAYWRIGHT_VERSION}"
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
           sudo apt-get install -y --no-install-recommends xvfb
-          # The script has to live in the workspace: Node resolves bare imports from the
-          # importing file's directory upwards, and nothing above /tmp has node_modules.
-          cat > "$GITHUB_WORKSPACE/load-check.mjs" <<'JS'
-          import { chromium } from 'playwright'
-          import os from 'node:os'
-          import path from 'node:path'
 
-          const ext = process.argv[2]
-          const profile = path.join(os.tmpdir(), `load-check-${Date.now()}`)
-          const ctx = await chromium.launchPersistentContext(profile, {
-              headless: false,
-              args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
-          })
+      - name: Load the package in Chrome
+        run: xvfb-run -a node scripts/load-check.mjs "$RUNNER_TEMP/unpacked"
 
-          // The worker may already be up by the time we look, so check before waiting.
-          let worker = ctx.serviceWorkers()[0]
-          if (!worker) {
-              worker = await ctx.waitForEvent('serviceworker', { timeout: 30000 })
-                  .catch(() => null)
-          }
-          if (!worker) {
-              console.error('::error::the extension loaded but no service worker registered')
-              await ctx.close()
-              process.exit(1)
-          }
-          const id = new URL(worker.url()).host
-          console.log(`service worker registered — extension id ${id}`)
-          console.log(`  ${worker.url()}`)
-
-          // The side panel is the whole UI; if its document cannot be opened the package is
-          // useless even though the worker came up.
-          const page = await ctx.newPage()
-          const res = await page.goto(`chrome-extension://${id}/sidepanel.html`, {
-              waitUntil: 'domcontentloaded', timeout: 20000,
-          }).catch(e => { console.error('::error::side panel failed to open: ' + e.message); return null })
-          if (!res) { await ctx.close(); process.exit(1) }
-          const title = await page.title()
-          console.log(`side panel opened — "${title}"`)
-
-          await ctx.close()
-          JS
-          xvfb-run -a node "$GITHUB_WORKSPACE/load-check.mjs" "$RUNNER_TEMP/unpacked"
-
+      # TODO pin: softprops/action-gh-release@<sha> # v2
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:

@@ -6,10 +6,26 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Nothing here writes to the repository; the token gets read access and no more.
+permissions:
+  contents: read
+
+# A push on top of a push cancels the run that is now checking stale code.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The version release.yml installs as well. It is part of the browser cache key, so bumping
+  # it here downloads a fresh Chromium instead of reusing the one cached for the old version.
+  PLAYWRIGHT_VERSION: 1.58.2
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # TODO: pin every `uses:` to a commit SHA (`actions/checkout@<sha> # v4`) once the SHAs
+      # can be verified against the upstream repositories; a tag can be moved, a SHA cannot.
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -26,39 +42,89 @@ jobs:
           exit $fail
 
       # A manifest that points at a file which is not there produces an extension that loads
-      # with a warning and then misbehaves in ways that look like logic bugs.
-      - name: Validate the manifest
+      # with a warning and then misbehaves in ways that look like logic bugs. The same goes for
+      # a page whose <script src> or <iframe src> names a file that was renamed.
+      - name: Validate the manifest and the pages
         run: |
-          node --input-type=module -e "
-          import { readFileSync, existsSync } from 'node:fs'
+          node --input-type=module - <<'JS'
+          import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+          import { dirname, join, normalize } from 'node:path'
+
           const m = JSON.parse(readFileSync('manifest.json', 'utf8'))
           const problems = []
           if (m.manifest_version !== 3) problems.push('manifest_version must be 3')
           for (const key of ['name', 'version', 'description']) {
-              if (!m[key]) problems.push(\`missing \${key}\`)
+              if (!m[key]) problems.push(`missing ${key}`)
           }
+          if (!m.minimum_chrome_version) problems.push('missing minimum_chrome_version')
+
           const referenced = [
               m.background?.service_worker,
               m.side_panel?.default_path,
               m.options_page,
               ...Object.values(m.icons ?? {}),
               ...Object.values(m.action?.default_icon ?? {}),
-              ...(m.content_scripts ?? []).flatMap(c => c.js ?? []),
+              ...(m.content_scripts ?? []).flatMap(c => [...(c.js ?? []), ...(c.css ?? [])]),
+              // Globs cannot be checked for existence; literal paths can.
+              ...(m.web_accessible_resources ?? []).flatMap(w => w.resources ?? []).filter(r => !/[*?]/.test(r)),
           ].filter(Boolean)
           for (const f of referenced) {
-              if (!existsSync(f)) problems.push(\`manifest references a missing file: \${f}\`)
+              if (!existsSync(f)) problems.push(`manifest references a missing file: ${f}`)
           }
+
+          // Every page the extension ships: local <script src>, <link href> and <iframe src>
+          // have to resolve relative to the page. Remote URLs (the font stylesheet) are skipped.
+          const pages = []
+          const walk = (dir) => {
+              for (const name of readdirSync(dir)) {
+                  if (name === 'node_modules' || name.startsWith('.')) continue
+                  const p = join(dir, name)
+                  if (statSync(p).isDirectory()) walk(p)
+                  else if (name.endsWith('.html')) pages.push(p)
+              }
+          }
+          walk('.')
+          const isLocal = (u) => u
+              && !/^(https?:)?\/\//i.test(u)
+              && !/^(data|blob|chrome|chrome-extension|about|javascript|mailto):/i.test(u)
+              && !u.startsWith('#')
+          let assets = 0
+          for (const page of pages) {
+              const html = readFileSync(page, 'utf8')
+              const refs = [
+                  ...[...html.matchAll(/<script\b[^>]*\ssrc=["']([^"']+)["']/gi)].map(x => ['script', x[1]]),
+                  ...[...html.matchAll(/<link\b[^>]*\shref=["']([^"']+)["']/gi)].map(x => ['link', x[1]]),
+                  ...[...html.matchAll(/<iframe\b[^>]*\ssrc=["']([^"']+)["']/gi)].map(x => ['iframe', x[1]]),
+              ]
+              for (const [kind, url] of refs) {
+                  if (!isLocal(url)) continue
+                  assets++
+                  const target = normalize(join(dirname(page), url.split(/[?#]/)[0]))
+                  if (!existsSync(target)) problems.push(`${page}: <${kind}> points at a missing file: ${url}`)
+              }
+          }
+          if (m.side_panel?.default_path && !pages.includes(join('.', m.side_panel.default_path))) {
+              problems.push(`side panel ${m.side_panel.default_path} was not among the pages scanned`)
+          }
+
           if (problems.length) {
               for (const p of problems) console.error('::error::' + p)
               process.exit(1)
           }
-          console.log(\`manifest ok — \${referenced.length} referenced files all present\`)
-          "
+          console.log(`manifest ok — ${referenced.length} referenced files present`)
+          console.log(`pages ok — ${pages.length} pages, ${assets} local script/style/iframe references all present`)
+          JS
 
       # The unit tests stub fetch, chrome.* and the DOM, so they need no gateway, no network and
-      # no credentials. The integration scripts beside them do, and are not run here.
+      # no credentials. The integration scripts beside them do, and are not run here. failglob
+      # makes an empty match an error: a glob that matches nothing would otherwise be passed
+      # to node literally, and the step would fail for the wrong reason or not at all.
       - name: Unit tests
-        run: node --test test/*.test.mjs
+        run: |
+          shopt -s failglob
+          files=(test/*.test.mjs)
+          echo "${#files[@]} unit test files"
+          node --test "${files[@]}"
 
       # This repository once carried a working gateway token for a live machine. The gate
       # exists so that cannot come back in silently.
@@ -87,4 +153,42 @@ jobs:
           scan "sk-ant-api03-[a-z0-9_-]*[A-Z0-9][A-Za-z0-9_-]{10,}" "Anthropic API key"
           scan "ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}" "GitHub token"
           scan "-----BEGIN [A-Z ]*PRIVATE KEY" "private key"
+          # A Firebase refresh token: what a signed-in session would leak if someone pasted
+          # their storage into a test fixture. The Web API key in js/auth.js is not one.
+          scan "AMf-[A-Za-z0-9_-]{20,}" "Firebase refresh token"
+          # Three base64url segments starting with eyJ ({"): a JWT, such as a Firebase id token.
+          scan "eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}" "JWT"
           exit $fail
+
+      # Everything above inspects the source. This gives the same files to a real Chromium.
+      # Only what release.yml packages is staged, so the check sees what users would get and
+      # node_modules (installed below) stays out of the extension directory.
+      - name: Stage what the browser loads
+        run: |
+          staging="$RUNNER_TEMP/unpacked"
+          mkdir -p "$staging"
+          cp -R manifest.json popup.html sidepanel.html css icons js pages LICENSE "$staging/"
+
+      # TODO pin: actions/cache@<sha> # v4
+      - name: Cache the Playwright browser
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ env.PLAYWRIGHT_VERSION }}-${{ runner.os }}-chromium
+
+      # Node resolves bare imports from the importing file's directory upwards, so playwright
+      # is installed in the repository root, where scripts/load-check.mjs can see it. On a cache
+      # hit only the system libraries are (re)installed; the browser itself is already there.
+      - name: Install Playwright and a display
+        run: |
+          npm install --no-save --no-package-lock "playwright@${PLAYWRIGHT_VERSION}"
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+          sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: Extension loads in Chromium
+        run: xvfb-run -a node scripts/load-check.mjs "$RUNNER_TEMP/unpacked"
