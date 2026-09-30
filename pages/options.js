@@ -46,6 +46,7 @@ async function loadSettings() {
     const settings = stored.agent_settings || {}
     document.getElementById('setting-blocked-sites').checked = settings.blockedSitesEnabled !== false
     document.getElementById('setting-tab-group').checked = settings.tabGroupEnabled !== false
+    document.getElementById('setting-screenshot-every-turn').checked = settings.screenshotEveryTurn === true
     document.getElementById('setting-max-steps').value = settings.maxSteps || 50
     document.getElementById('setting-screenshot-quality').value = settings.screenshotQuality || 80
 
@@ -67,6 +68,7 @@ async function saveSettings() {
         agent_settings: {
             blockedSitesEnabled: document.getElementById('setting-blocked-sites').checked,
             tabGroupEnabled: document.getElementById('setting-tab-group').checked,
+            screenshotEveryTurn: document.getElementById('setting-screenshot-every-turn').checked,
             maxSteps: Number.isFinite(maxSteps) ? clamp(maxSteps, 1, 500) : 50,
             screenshotQuality: Number.isFinite(quality) ? clamp(quality, 10, 100) : 80
         }

@@ -27,6 +27,10 @@ cd test && npm test              # the same thing
 | `automation-engine.test.mjs` | `describeAction()` names the ref for `click_ref` and never reads "undefined", with or without I18n; unknown types come back as their name; `isKnownAction` |
 | `workflow-recorder.test.mjs` | `recordAction()` folds keystrokes into one step per field, keeps `redacted`, records nothing when off |
 | `i18n-parity.test.mjs` | en and zh have the same keys and the same `{placeholders}`; every key the HTML and the scripts ask for exists in en; every language in the picker can be selected |
+| `permission-manager.test.mjs` | `checkPermission()` per mode; `execute_js` and sensitive fields ask in every mode; "approve all" covers one run and never writes the mode; a run's mode override; plan steps; cancel and supersede |
+| `action-results.test.mjs` | `ActionResults.summarize()` for every reading action (page text, find, console, network, tabs, execute_js), clipping; `parseRefLabels()` |
+| `sensitive-field.test.mjs` | `isSensitiveField()`/`fieldLabel()` in the content script; the worker's injected functions carry the same test and honour `confirmedSensitive` |
+| `task-scheduler.test.mjs` | `TaskScheduler.add()`: interval, start URL (http(s) only), unattended flag, the alarm it creates |
 | `manifest.test.mjs` | MV3, `minimum_chrome_version`, every permission is used and every permission-gated API is declared, no content scripts or web-accessible resources, shortcuts avoid `Ctrl+E`/`Ctrl+Shift+A` |
 
 `helpers/load.mjs` is the loader they share: `loadScripts(paths, { globals, chrome, prelude })`

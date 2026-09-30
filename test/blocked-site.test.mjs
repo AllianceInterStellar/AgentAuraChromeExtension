@@ -83,11 +83,34 @@ test('the decision is case-insensitive in host and path', () => {
     assert.equal(isBlockedSite('https://example.com/AUTH/x'), true)
 })
 
+test('isHttpUrl: the only scheme a navigation may use', () => {
+    const { isHttpUrl } = exports['js/background.js']
+    for (const ok of ['https://example.com', 'http://localhost:3000/x', ' HTTPS://E.COM/?a=b#c ']) assert.equal(isHttpUrl(ok), true, ok)
+    for (const bad of ['javascript:alert(1)', 'data:text/html,hi', 'file:///etc/passwd', 'chrome://settings', 'about:blank', 'https://', 'https:// space.com', 'example.com', '', null, undefined, 42]) {
+        assert.equal(isHttpUrl(bad), false, String(bad))
+    }
+})
+
+test('matchesPattern: a regular expression when it parses, a substring otherwise, everything when empty', () => {
+    const { matchesPattern } = exports['js/background.js']
+    assert.equal(matchesPattern('[error] boom', 'err'), true)
+    assert.equal(matchesPattern('[error] boom', 'ERR'), true, 'case-insensitive')
+    assert.equal(matchesPattern('[error] boom', '^\\[error\\]'), true)
+    assert.equal(matchesPattern('[error] boom', 'warn|info'), false)
+    assert.equal(matchesPattern('a(b', 'a(b'), true, 'an unparseable pattern falls back to substring')
+    assert.equal(matchesPattern('anything', ''), true)
+    assert.equal(matchesPattern('anything', undefined), true)
+    assert.equal(matchesPattern(undefined, 'x'), false)
+})
+
 test('the worker exports what the tests and the side panel rely on', () => {
     const api = exports['js/background.js']
     assert.equal(api.isBlockedSite, isBlockedSite)
     assert.equal(typeof api.mapKey, 'function')
+    assert.equal(typeof api.isHttpUrl, 'function')
     assert.equal(api.ERR.BLOCKED_SITE, 'BLOCKED_SITE')
+    assert.equal(api.ERR.SENSITIVE_FIELD, 'SENSITIVE_FIELD')
+    assert.equal(api.ERR.INVALID_URL, 'INVALID_URL')
     for (const [name, code] of Object.entries(api.ERR)) {
         assert.equal(name, code, 'error codes read the same as their names')
     }

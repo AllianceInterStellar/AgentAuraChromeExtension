@@ -65,6 +65,16 @@ test('no action type produces "undefined" or an unfilled placeholder, in either 
     }
 })
 
+test('the approval card can ask for more of the typed text than the banner shows', () => {
+    const text = 'a'.repeat(200)
+    const banner = engineWithoutI18n.describeAction({ type: 'type_ref', ref: 1, text })
+    const card = engineWithoutI18n.describeAction({ type: 'type_ref', ref: 1, text }, { text: 120 })
+    assert.match(banner, /a{30}…/)
+    assert.doesNotMatch(banner, /a{31}/)
+    assert.match(card, /a{120}…/)
+    assert.doesNotMatch(card, /a{121}/)
+})
+
 test('long values are clipped so a selector cannot flood the card', () => {
     const line = engineWithoutI18n.describeAction({ type: 'click', selector: 'x'.repeat(500) })
     assert.ok(line.length < 120, line.length)

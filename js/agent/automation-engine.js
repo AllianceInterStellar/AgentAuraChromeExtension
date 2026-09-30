@@ -65,14 +65,15 @@ class AutomationEngine {
      * content script has no I18n). Values the model produced are clipped so a long selector
      * cannot flood the UI.
      */
-    describeAction(action) {
+    describeAction(action, limits = {}) {
         const clip = (v, n = 80) => {
             const s = String(v ?? '')
             return s.length > n ? s.slice(0, n) + '…' : s
         }
         const p = {
             selector: clip(action.selector),
-            text: clip(action.text, 30),
+            // The approval card asks for more of the text than a banner has room for.
+            text: clip(action.text, limits.text ?? 30),
             url: clip(action.url, 120),
             direction: action.direction || 'down',
             duration: action.duration || 1000,

@@ -43,14 +43,30 @@ class TaskScheduler {
         return n
     }
 
-    async add(prompt, intervalMinutes, name, url = null) {
+    /** A start URL has to be a page the agent may open: http(s), nothing else. */
+    static normalizeUrl(url) {
+        const s = String(url || '').trim()
+        if (s === '') return null
+        return /^https?:\/\/\S+$/i.test(s) ? s : undefined
+    }
+
+    /**
+     * `options.url` is the page the task's window opens on (the model starts from a blank tab
+     * otherwise). `options.allowUnattended` lets the run use the stored permission mode; without
+     * it a scheduled run asks before every action, whatever the mode, because nobody may be
+     * watching when the alarm fires.
+     */
+    async add(prompt, intervalMinutes, options = {}) {
         const interval = TaskScheduler.normalizeInterval(intervalMinutes)
         if (!interval) throw new Error('Interval must be a whole number of minutes, at least 1')
+        const url = TaskScheduler.normalizeUrl(options.url)
+        if (url === undefined) throw new Error('The start URL must begin with http:// or https://')
         const task = {
             id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            name: name || prompt.substring(0, 40),
+            name: options.name || prompt.substring(0, 40),
             prompt,
             url,
+            allowUnattended: options.allowUnattended === true,
             intervalMinutes: interval,
             enabled: true,
             lastRun: null,
@@ -92,4 +108,8 @@ class TaskScheduler {
     getAll() {
         return this.tasks
     }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { TaskScheduler }
 }

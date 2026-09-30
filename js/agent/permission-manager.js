@@ -1,3 +1,18 @@
+/**
+ * Who gets to approve an action before it runs.
+ *
+ * Three modes, chosen by the user and kept in storage: `ask` (every action), `act` (none),
+ * `plan` (the steps of a plan the user approved run, anything else asks). On top of the mode:
+ *
+ *   - Some actions ask whatever the mode is. Running arbitrary JavaScript in the page and
+ *     typing into a password or card field are never something "act" waves through, and
+ *     neither is "approve all": that is how Claude in Chrome treats them too.
+ *   - "Approve all" answers the rest of THIS run, not every run from now on. It used to
+ *     switch the stored mode to `act`, which also silently governed every later scheduled
+ *     task.
+ *   - A run may carry a mode override: a scheduled task that fires while nobody asked for
+ *     autonomy runs under `ask` even when the stored mode is `act`.
+ */
 class PermissionManager {
     constructor() {
         this.mode = 'ask'
@@ -10,9 +25,16 @@ class PermissionManager {
         this._approvalTimeout = 60000
         this._planApprovalTimeout = 120000
         this._approvedPlan = null
+        /** "Approve all" for the current run; cleared when the run ends. */
+        this.approveAllForRun = false
+        /** A mode the current run has to use instead of the stored one, or null. */
+        this.runModeOverride = null
     }
 
     static MODES = ['ask', 'act', 'plan']
+
+    /** Actions that ask in every mode, "approve all" included. */
+    static ALWAYS_CONFIRM = new Set(['execute_js'])
 
     async init() {
         const stored = await chrome.storage.local.get('agent_permission_mode')
@@ -25,21 +47,64 @@ class PermissionManager {
         await chrome.storage.local.set({ agent_permission_mode: mode })
     }
 
+    /** The mode this run actually uses. */
+    effectiveMode() {
+        return PermissionManager.MODES.includes(this.runModeOverride) ? this.runModeOverride : this.mode
+    }
+
+    /** Start of a run: nothing approved yet, and the run's mode override if it has one. */
+    beginRun({ modeOverride = null } = {}) {
+        this.approveAllForRun = false
+        this._approvedPlan = null
+        this.runModeOverride = PermissionManager.MODES.includes(modeOverride) ? modeOverride : null
+    }
+
+    endRun() {
+        this.approveAllForRun = false
+        this._approvedPlan = null
+        this.runModeOverride = null
+    }
+
+    /** Whether `action` asks regardless of mode. */
+    static alwaysConfirms(action) {
+        if (!action) return false
+        return PermissionManager.ALWAYS_CONFIRM.has(action.type) || action.sensitive === true
+    }
+
     /**
      * In `plan` mode only the steps of the plan the user approved may run. Anything the model
      * adds afterwards goes through the ordinary per-action approval.
      */
     async checkPermission(action) {
-        if (this.mode === 'act') {
+        if (PermissionManager.alwaysConfirms(action)) {
+            return await this.requestApproval(action)
+        }
+        if (this.approveAllForRun) {
+            return { approved: true, approveAll: true }
+        }
+        const mode = this.effectiveMode()
+        if (mode === 'act') {
             return { approved: true, approveAll: false }
         }
-        if (this.mode === 'plan') {
+        if (mode === 'plan') {
             if (this._approvedPlan && this._approvedPlan.includes(action)) {
                 return { approved: true, approveAll: false }
             }
             return await this.requestApproval(action)
         }
         return await this.requestApproval(action)
+    }
+
+    /**
+     * The worker refused to type into a field that looks like a password or a card number.
+     * The user decides; the answer is good for this one action only.
+     */
+    async requestSensitiveApproval(action, result) {
+        return await this.requestApproval({
+            ...action,
+            sensitive: true,
+            fieldLabel: (result && result.field) || ''
+        })
     }
 
     _settle(result) {
@@ -120,10 +185,10 @@ class PermissionManager {
         if (this.approvalResolver) this._settle({ approved: true, approveAll: false })
     }
 
-    async approveAll() {
+    /** This action and the rest of the run, except what always asks. The stored mode is untouched. */
+    approveAll() {
+        this.approveAllForRun = true
         if (this.approvalResolver) this._settle({ approved: true, approveAll: true })
-        // "Approve all" is a mode change and has to survive closing the panel.
-        await this.setMode('act')
     }
 
     deny() {
@@ -141,6 +206,12 @@ class PermissionManager {
     /** Stop pressed, new chat, panel closing: whatever is waiting is answered "no". */
     cancelPending() {
         this._approvedPlan = null
+        this.approveAllForRun = false
+        this.runModeOverride = null
         if (this.approvalResolver) this._settle({ approved: false, cancelled: true })
     }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { PermissionManager }
 }

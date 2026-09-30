@@ -80,7 +80,10 @@
                 id: node.id || undefined,
                 type: node.type || undefined,
                 href: node.href || undefined,
-                value: (node.value !== undefined && node.value !== '' && isInteractive) ? String(node.value).substring(0, 50) : undefined,
+                // A password the browser autofilled used to travel to the model inside this
+                // field. Sensitive fields report that they are sensitive, never their value.
+                value: (node.value !== undefined && node.value !== '' && isInteractive && !isSensitiveField(node)) ? String(node.value).substring(0, 50) : undefined,
+                sensitive: isInteractive && isSensitiveField(node) ? true : undefined,
                 placeholder: node.placeholder || undefined,
                 disabled: node.disabled || undefined,
                 checked: node.checked !== undefined ? node.checked : undefined,
@@ -117,6 +120,7 @@
             line += '>'
             if (node.label) line += ` "${node.label}"`
             if (node.value) line += ` value="${node.value}"`
+            if (node.sensitive) line += ' sensitive'
             if (node.href) line += ` → ${node.href.substring(0, 80)}`
             if (node.bbox) line += ` @(${node.bbox.x},${node.bbox.y})`
             if (length + line.length + 1 > maxLength) {
@@ -178,6 +182,29 @@
         return false
     }
 
+    /**
+     * A field whose value must not reach the model and whose filling the user has to confirm:
+     * passwords, one-time codes, card numbers and CVCs, and anything named like a secret. The
+     * same test is spelled out in the worker's injected functions and in the recorder.
+     */
+    function isSensitiveField(el) {
+        if (!el) return false
+        const type = String(el.type || '').toLowerCase()
+        if (type === 'password') return true
+        const autocomplete = String((el.getAttribute && el.getAttribute('autocomplete')) || '').toLowerCase()
+        if (/^cc-|password|one-time-code/.test(autocomplete)) return true
+        const nameId = `${el.name || ''} ${el.id || ''}`.toLowerCase()
+        return /passw|secret|token|cvv|card/.test(nameId)
+    }
+
+    /** What the approval card calls the field: its label, else aria-label, placeholder, name, id or type. */
+    function fieldLabel(el) {
+        const label = (el.labels && el.labels[0] && el.labels[0].textContent && el.labels[0].textContent.trim())
+            || (el.getAttribute && el.getAttribute('aria-label'))
+            || el.placeholder || el.name || el.id || el.type || ''
+        return String(label).slice(0, 80)
+    }
+
     function isVisibleElement(el) {
         const style = window.getComputedStyle(el)
         if (style.display === 'none' || style.visibility === 'hidden') return false
@@ -208,7 +235,8 @@
                 type: el.type || '',
                 name: el.name || '',
                 label: getAccessibleName(el),
-                value: el.value?.substring(0, 30) || ''
+                value: isSensitiveField(el) ? '' : (el.value?.substring(0, 30) || ''),
+                sensitive: isSensitiveField(el) || undefined
             }))
         }))
 
@@ -256,6 +284,13 @@
             const el = getElementByRefId(message.refId)
             if (!el) {
                 sendResponse({ success: false, code: 'ELEMENT_NOT_FOUND', error: `Element [${message.refId}] not found` })
+            } else if (isSensitiveField(el) && message.confirmed !== true) {
+                sendResponse({
+                    success: false,
+                    code: 'SENSITIVE_FIELD',
+                    error: 'This field looks like a password or card field; the user has to confirm',
+                    field: fieldLabel(el)
+                })
             } else {
                 el.focus()
                 if (message.clear !== false) el.value = ''
@@ -284,4 +319,10 @@
             }
         }
     })
+
+    // For the unit tests, which load this file into a vm context. The content script runs in
+    // the isolated world, where the page's own `module` (if it has one) is not visible.
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { isSensitiveField, fieldLabel }
+    }
 })()

@@ -787,6 +787,32 @@ h4.sp-md-heading {
     color: var(--text-secondary);
 }
 
+/* The code execute_js would run. Shown in full (scrolling) so the user can actually judge it. */
+.sp-approval-code {
+    margin: 8px 0 0;
+    padding: 8px;
+    max-height: 140px;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--text-primary);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.sp-approval-warning {
+    margin-top: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--warning, #ff9800);
+    background: var(--warning-bg, rgba(255, 152, 0, 0.12));
+    border-radius: 6px;
+}
+
 .sp-approval-buttons,
 .sp-plan-buttons {
     display: flex;
@@ -1196,4 +1222,26 @@ h4.sp-md-heading {
         animation-iteration-count: 1 !important;
         transition-duration: .01ms !important;
     }
+}
+
+.sp-schedule-url-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    padding: 6px 8px;
+}
+
+.sp-schedule-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.sp-schedule-check input {
+    margin-top: 2px;
+    flex: none;
 }

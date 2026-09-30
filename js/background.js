@@ -14,17 +14,54 @@ const ERR = {
     UNKNOWN_ACTION: 'UNKNOWN_ACTION',
     CONTENT_SCRIPT_UNAVAILABLE: 'CONTENT_SCRIPT_UNAVAILABLE',
     TAB_NOT_IN_GROUP: 'TAB_NOT_IN_GROUP',
-    UNKNOWN_MESSAGE: 'UNKNOWN_MESSAGE'
+    UNKNOWN_MESSAGE: 'UNKNOWN_MESSAGE',
+    /** The target of type/form_input/cdp_type looks like a password or card field; the user has to confirm. */
+    SENSITIVE_FIELD: 'SENSITIVE_FIELD',
+    /** A navigation target that is not http(s). */
+    INVALID_URL: 'INVALID_URL',
+    /** A screenshot of a tab that is not the visible one. */
+    NOT_VISIBLE: 'NOT_VISIBLE'
 }
 
 const fail = (code, error, extra = {}) => ({ success: false, code, error: error || code, ...extra })
+
+/** The only scheme the agent may navigate to. javascript:, data:, file: and chrome: are not pages it may open. */
+function isHttpUrl(url) {
+    return /^https?:\/\/\S+$/i.test(String(url || '').trim())
+}
+
+/**
+ * A navigation target is checked BEFORE the tab goes there: an off-limits address used to be
+ * reached first and only the actions after it refused. Returns the failure, or null.
+ */
+async function checkNavigationTarget(url) {
+    if (!isHttpUrl(url)) return fail(ERR.INVALID_URL, 'Only http:// and https:// addresses can be opened')
+    if (await isSiteBlocked(url)) return fail(ERR.BLOCKED_SITE, 'That address is off limits for security reasons (a sign-in, bank or government page)')
+    return null
+}
+
+/**
+ * `pattern` from the model, applied to a console or network line: a regular expression when
+ * it parses as one, a case-insensitive substring otherwise. No pattern matches everything.
+ */
+function matchesPattern(text, pattern) {
+    if (pattern === undefined || pattern === null || pattern === '') return true
+    const s = String(text ?? '')
+    try {
+        return new RegExp(String(pattern), 'i').test(s)
+    } catch (_) {
+        return s.toLowerCase().includes(String(pattern).toLowerCase())
+    }
+}
 
 const SETTINGS_KEY = 'agent_settings'
 const DEFAULT_SETTINGS = {
     blockedSitesEnabled: true,
     screenshotQuality: 80,
     maxSteps: 50,
-    tabGroupEnabled: true
+    tabGroupEnabled: true,
+    /** A screenshot on every model turn. Off: the panel sends one only when the element list is not enough or the model asks. */
+    screenshotEveryTurn: false
 }
 
 const TAB_GROUP_STATE_KEY = 'agent_tab_group_state'
@@ -356,10 +393,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
  */
 async function executeScheduledTask(task) {
     try {
+        // Not focused: an alarm firing in the middle of the user's typing must not steal the
+        // keyboard. The notification click brings the window forward when they are ready.
         const win = await chrome.windows.create({
             url: task.url || 'about:blank',
             type: 'normal',
-            focused: true
+            focused: false
         })
         const tab = win.tabs?.[0] || (await chrome.tabs.query({ windowId: win.id }))[0]
         if (!tab) throw new Error('The task window has no tab')
@@ -390,6 +429,7 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
     const pending = stored[PENDING_TASK_KEY]
     if (!pending) return
     try {
+        if (pending.windowId) await chrome.windows.update(pending.windowId, { focused: true }).catch(() => { })
         await openAgentForTab(pending.tabId)
     } catch (e) {
         console.error('[Background] could not open the panel for the scheduled task:', e)
@@ -514,21 +554,35 @@ async function handleAgentAction(action, tabId) {
             }, [action.selector || ''])
 
         case 'type':
-            return await execFunc(tab.id, (selector, text) => {
+            // Injected functions cannot share code with the worker, so the sensitive-field
+            // test is spelled out here, in form_input, in the content script and in the
+            // recorder. Keep the four in step.
+            return await execFunc(tab.id, (selector, text, confirmed) => {
                 const el = document.querySelector(selector)
                 if (!el) return { success: false, code: 'ELEMENT_NOT_FOUND', error: 'Element not found' }
+                const type = String(el.type || '').toLowerCase()
+                const autocomplete = String(el.getAttribute?.('autocomplete') || '').toLowerCase()
+                const nameId = `${el.name || ''} ${el.id || ''}`.toLowerCase()
+                const sensitive = type === 'password' || /^cc-|password|one-time-code/.test(autocomplete) || /passw|secret|token|cvv|card/.test(nameId)
+                if (sensitive && !confirmed) {
+                    const label = el.labels?.[0]?.textContent?.trim() || el.getAttribute?.('aria-label') || el.placeholder || el.name || el.id || type
+                    return { success: false, code: 'SENSITIVE_FIELD', error: 'This field looks like a password or card field; the user has to confirm', field: String(label).slice(0, 80) }
+                }
                 el.focus()
                 el.value = ''
                 el.value = text
                 el.dispatchEvent(new Event('input', { bubbles: true }))
                 el.dispatchEvent(new Event('change', { bubbles: true }))
                 return { success: true }
-            }, [action.selector || '', action.text || ''])
+            }, [action.selector || '', action.text || '', action.confirmedSensitive === true])
 
-        case 'navigate':
+        case 'navigate': {
+            const refused = await checkNavigationTarget(action.url)
+            if (refused) return refused
             await chrome.tabs.update(tab.id, { url: action.url })
             await waitForTabComplete(tab.id, 10000)
             return { success: true }
+        }
 
         case 'scroll':
             return await execFunc(tab.id, (dir, amount) => {
@@ -540,9 +594,17 @@ async function handleAgentAction(action, tabId) {
             }, [action.direction || 'down', Number(action.amount) || 300])
 
         case 'form_input':
-            return await execFunc(tab.id, (selector, value, checked) => {
+            return await execFunc(tab.id, (selector, value, checked, confirmed) => {
                 const el = document.querySelector(selector)
                 if (!el) return { success: false, code: 'ELEMENT_NOT_FOUND', error: 'Element not found' }
+                const type = String(el.type || '').toLowerCase()
+                const autocomplete = String(el.getAttribute?.('autocomplete') || '').toLowerCase()
+                const nameId = `${el.name || ''} ${el.id || ''}`.toLowerCase()
+                const sensitive = type === 'password' || /^cc-|password|one-time-code/.test(autocomplete) || /passw|secret|token|cvv|card/.test(nameId)
+                if (sensitive && !confirmed) {
+                    const label = el.labels?.[0]?.textContent?.trim() || el.getAttribute?.('aria-label') || el.placeholder || el.name || el.id || type
+                    return { success: false, code: 'SENSITIVE_FIELD', error: 'This field looks like a password or card field; the user has to confirm', field: String(label).slice(0, 80) }
+                }
                 el.focus()
                 if (el.tagName === 'SELECT') {
                     el.value = value
@@ -556,7 +618,7 @@ async function handleAgentAction(action, tabId) {
                     el.dispatchEvent(new Event('change', { bubbles: true }))
                 }
                 return { success: true }
-            }, [action.selector || '', action.value || '', !!action.checked])
+            }, [action.selector || '', action.value || '', !!action.checked, action.confirmedSensitive === true])
 
         case 'wait':
             await new Promise(r => setTimeout(r, Math.min(Number(action.duration) || 1000, 30000)))
@@ -587,6 +649,10 @@ async function handleAgentAction(action, tabId) {
 
         case 'tabs_create':
         case 'new_tab': {
+            if (action.url) {
+                const refused = await checkNavigationTarget(action.url)
+                if (refused) return refused
+            }
             const created = await chrome.tabs.create({ url: action.url || 'about:blank' })
             if (tab.id) {
                 const ensuredGroup = await ensureTabGroup(tab.id)
@@ -645,7 +711,8 @@ async function handleAgentAction(action, tabId) {
                 type: 'TYPE_IN_ELEMENT_BY_REF',
                 refId: action.ref,
                 text: action.text || '',
-                clear: action.clear !== false
+                clear: action.clear !== false,
+                confirmed: action.confirmedSensitive === true
             })
 
         case 'hover_ref':
@@ -665,9 +732,26 @@ async function handleAgentAction(action, tabId) {
             await cdpMouseEvent(tab.id, 'click', action.x, action.y, action.button || 'left', action.clickCount || 1)
             return { success: true }
 
-        case 'cdp_type':
+        case 'cdp_type': {
+            // Input.insertText goes to whatever has focus, so that element is what is checked.
+            if (action.confirmedSensitive !== true) {
+                const focused = await execFunc(tab.id, () => {
+                    const el = document.activeElement
+                    if (!el || el === document.body) return { sensitive: false }
+                    const type = String(el.type || '').toLowerCase()
+                    const autocomplete = String(el.getAttribute?.('autocomplete') || '').toLowerCase()
+                    const nameId = `${el.name || ''} ${el.id || ''}`.toLowerCase()
+                    const sensitive = type === 'password' || /^cc-|password|one-time-code/.test(autocomplete) || /passw|secret|token|cvv|card/.test(nameId)
+                    const label = el.labels?.[0]?.textContent?.trim() || el.getAttribute?.('aria-label') || el.placeholder || el.name || el.id || type
+                    return { sensitive, field: String(label).slice(0, 80) }
+                }, [])
+                if (focused && focused.sensitive) {
+                    return fail(ERR.SENSITIVE_FIELD, 'The focused field looks like a password or card field; the user has to confirm', { field: focused.field })
+                }
+            }
             await cdpTypeText(tab.id, action.text || '')
             return { success: true }
+        }
 
         case 'cdp_key':
             await cdpKeyEvent(tab.id, action.key, action.modifiers || 0)
@@ -682,10 +766,19 @@ async function handleAgentAction(action, tabId) {
             return { success: true }
 
         case 'read_console':
-            return { success: true, messages: consoleMessages.get(tab.id) || [] }
+            return {
+                success: true,
+                messages: (consoleMessages.get(tab.id) || []).filter(m =>
+                    matchesPattern(`${m.level} ${m.text} ${m.url}`, action.pattern)
+                    && (!action.level || String(m.level).toLowerCase() === String(action.level).toLowerCase()))
+            }
 
         case 'read_network':
-            return { success: true, requests: networkRequests.get(tab.id) || [] }
+            return {
+                success: true,
+                requests: (networkRequests.get(tab.id) || []).filter(r =>
+                    matchesPattern(`${r.method} ${r.url} ${r.status || ''} ${r.mimeType || ''}`, action.pattern))
+            }
 
         default:
             return fail(ERR.UNKNOWN_ACTION, `Unknown action type: ${action.type}`)
@@ -723,9 +816,10 @@ async function waitForTabComplete(tabId, timeoutMs) {
 async function takeScreenshot(tabId) {
     const tab = await resolveTab(tabId)
     if (!tab) throw Object.assign(new Error('No tab'), { code: ERR.NO_TAB })
+    // captureVisibleTab photographs the tab the window is showing. Switching to the target
+    // first used to steal the user's focus mid-task; now the model is told to select_tab.
     if (!tab.active) {
-        await chrome.tabs.update(tab.id, { active: true })
-        await new Promise(r => setTimeout(r, 200))
+        throw Object.assign(new Error('That tab is not the visible one; select_tab first'), { code: ERR.NOT_VISIBLE })
     }
     const settings = await getSettings()
     const quality = Math.min(100, Math.max(10, Number(settings.screenshotQuality) || 80))
@@ -1305,5 +1399,5 @@ async function openAgentForTab(tabId) {
 
 // Exposed for the unit tests, which load this file into a vm context with a stubbed `chrome`.
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { isBlockedSite, mapKey, ERR }
+    module.exports = { isBlockedSite, isHttpUrl, matchesPattern, mapKey, ERR }
 }

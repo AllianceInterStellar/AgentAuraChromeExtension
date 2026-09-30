@@ -13,8 +13,10 @@ on an agent gateway you deploy, and this extension is the pair of hands.
 
 - **Side-panel chat** (`Alt+Shift+E`; `Alt+Shift+A` opens the agent for the current tab) that
   talks to your agent gateway over a WebSocket.
-- **Browser automation** driven by the model: navigation, clicks, typing, extraction. Actions
-  go through the Chrome DevTools Protocol, so they work on pages that ignore synthetic events.
+- **Browser automation** driven by the model: navigation, clicks, typing, forms, reading page
+  text, console and network, running JavaScript, screenshots on request. Clicks and typing
+  are DOM events by default; the `cdp_*` actions go through the Chrome DevTools Protocol for
+  pages that ignore synthetic events. Every action's result is sent back to the model.
 - **An accessibility-tree view of the page** rather than raw HTML, so the model sees the
   structure a screen reader would instead of a megabyte of markup.
 - **Workflow recording** — capture what you did once, replay it as a saved shortcut.
@@ -35,6 +37,15 @@ not buried in a settings page:
 | **Ask Before Acting** | The agent asks for approval before each action. The default. |
 | **Act Before Asking** | The agent acts, then shows you what it did. |
 | **Follow a Plan** | The agent presents a plan and executes it once you approve. |
+
+Whatever the mode, two things always ask first: running JavaScript in the page
+(`execute_js`, with the code shown on the card), and typing into a field that looks like a
+password, one-time code or card number (the field is named on the card, and its current value
+is never sent to the model). "Approve all" on the card covers the rest of that task, not every
+task from then on. A scheduled task asks before every action unless it was created with "run
+unattended", because nobody may be watching when its alarm fires. Screenshots go to the model
+when the element list cannot carry the page or when the agent asks for one, not on every
+turn; the old behaviour is a switch in Settings.
 
 A visual indicator is injected into any page the agent is acting on, so an automated click is
 never mistaken for one of yours.

@@ -181,6 +181,8 @@
                 <div class="sp-approval-action" id="sp-approval-action">
                     <span class="sp-approval-type" id="sp-approval-type">click</span>
                     <span class="sp-approval-desc" id="sp-approval-desc">Click on "Submit" button</span>
+                    <pre class="sp-approval-code hidden" id="sp-approval-code"></pre>
+                    <div class="sp-approval-warning hidden" id="sp-approval-warning" role="alert"></div>
                 </div>
                 <div class="sp-approval-buttons">
                     <button class="sp-btn sp-btn-secondary" id="sp-btn-deny" data-i18n="approval.deny">Deny</button>
@@ -255,10 +257,19 @@
                 <textarea id="sp-schedule-prompt" class="sp-input" data-i18n-placeholder="schedule.prompt"
                     placeholder="Enter scheduled task prompt..." rows="2"></textarea>
                 <div class="sp-schedule-interval-row">
-                    <label data-i18n="schedule.interval">Interval (min):</label>
+                    <label for="sp-schedule-interval" data-i18n="schedule.interval">Interval (min):</label>
                     <input type="number" id="sp-schedule-interval" class="sp-schedule-interval-input" value="60"
                         min="1">
                 </div>
+                <div class="sp-schedule-interval-row">
+                    <label for="sp-schedule-url" data-i18n="schedule.url">Start URL (optional):</label>
+                    <input type="url" id="sp-schedule-url" class="sp-input sp-schedule-url-input"
+                        placeholder="https://" inputmode="url" autocomplete="off">
+                </div>
+                <label class="sp-schedule-check">
+                    <input type="checkbox" id="sp-schedule-unattended">
+                    <span data-i18n="schedule.unattended">Run unattended (use the current permission mode instead of asking before every action)</span>
+                </label>
             </div>
             <div class="sp-shortcuts-list" id="sp-schedule-list"></div>
             <button class="sp-btn sp-btn-primary sp-btn-full" id="sp-btn-add-schedule">
@@ -326,6 +337,7 @@
     <script src="js/auth.js"></script>
     <script src="js/chat.js"></script>
     <script src="js/agent/automation-engine.js"></script>
+    <script src="js/agent/action-results.js"></script>
     <script src="js/agent/tab-manager.js"></script>
     <script src="js/agent/permission-manager.js"></script>
     <script src="js/agent/workflow-recorder.js"></script>
