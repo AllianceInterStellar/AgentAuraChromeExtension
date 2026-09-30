@@ -22,7 +22,9 @@ const ERR = {
     /** A screenshot of a tab that is not the visible one. */
     NOT_VISIBLE: 'NOT_VISIBLE',
     /** The page did not answer a script within the time limit (a dialog is the usual reason). */
-    TIMEOUT: 'TIMEOUT'
+    TIMEOUT: 'TIMEOUT',
+    /** Forbidden by the organization's managed policy. */
+    POLICY: 'POLICY'
 }
 
 /** How long a script in the page may take before the action is given up. */
@@ -213,6 +215,8 @@ async function isSiteBlocked(url) {
     const settings = await getSettings()
     let host = ''
     try { host = new URL(url).hostname } catch (_) { return false }
+    // The administrator's word comes before the user's exceptions.
+    if (policyBlocksHost(host, await getPolicy())) return true
     if (hostMatches(host, settings.allowedHosts)) return false
     if (hostMatches(host, settings.extraBlockedHosts)) return true
     if (settings.blockedSitesEnabled === false) return false
@@ -243,7 +247,66 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes[SETTINGS_KEY]) {
         settingsCache = { ...DEFAULT_SETTINGS, ...(changes[SETTINGS_KEY].newValue || {}) }
     }
+    if (area === 'managed') policyCache = null
 })
+
+// ---------------------------------------------------------------------------------------------
+// Managed policy (chrome.storage.managed, set by an administrator; see managed_schema.json)
+// ---------------------------------------------------------------------------------------------
+
+const EMPTY_POLICY = {
+    AllowedSites: [],
+    BlockedSites: [],
+    AllowedPermissionModes: [],
+    DisableExecuteJs: false,
+    DisableScheduledTasks: false,
+    DisableUnattendedRuns: false
+}
+
+/** Pure: whatever the administrator wrote, in the shape the code reads. Unit-tested. */
+function normalizePolicy(raw) {
+    const policy = { ...EMPTY_POLICY }
+    if (!raw || typeof raw !== 'object') return policy
+    const hosts = (list) => (Array.isArray(list) ? list : [])
+        .map(v => String(v || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+        .filter(v => /^[a-z0-9.-]+$/.test(v))
+    policy.AllowedSites = hosts(raw.AllowedSites)
+    policy.BlockedSites = hosts(raw.BlockedSites)
+    policy.AllowedPermissionModes = (Array.isArray(raw.AllowedPermissionModes) ? raw.AllowedPermissionModes : [])
+        .map(v => String(v || '').trim().toLowerCase())
+        .filter(v => ['ask', 'act', 'plan'].includes(v))
+    for (const flag of ['DisableExecuteJs', 'DisableScheduledTasks', 'DisableUnattendedRuns']) {
+        policy[flag] = raw[flag] === true
+    }
+    return policy
+}
+
+/** Whether the policy has anything to say at all (the options page shows a notice then). */
+function policyIsSet(policy) {
+    return policy.AllowedSites.length > 0 || policy.BlockedSites.length > 0 || policy.AllowedPermissionModes.length > 0
+        || policy.DisableExecuteJs || policy.DisableScheduledTasks || policy.DisableUnattendedRuns
+}
+
+/** Pure: whether the policy keeps the agent off `host`. Unit-tested. */
+function policyBlocksHost(host, policy) {
+    if (!host) return false
+    if (hostMatches(host, policy.BlockedSites)) return true
+    return policy.AllowedSites.length > 0 && !hostMatches(host, policy.AllowedSites)
+}
+
+let policyCache = null
+
+async function getPolicy() {
+    if (policyCache) return policyCache
+    let raw = {}
+    try {
+        raw = await chrome.storage.managed.get(null)
+    } catch (_) {
+        // No managed storage on this profile: an unmanaged install.
+    }
+    policyCache = normalizePolicy(raw)
+    return policyCache
+}
 
 async function t(key, params) {
     try {
@@ -388,6 +451,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'GET_SETTINGS':
             return respond(getSettings().then(settings => ({ success: true, settings })))
 
+        case 'GET_POLICY':
+            return respond(getPolicy().then(policy => ({ success: true, policy, managed: policyIsSet(policy) })))
+
         case 'TAKE_PENDING_SCHEDULED_TASK':
             return respond(takePendingScheduledTask(message.tabId))
     }
@@ -404,8 +470,9 @@ async function rebuildScheduledAlarms() {
     const stored = await chrome.storage.local.get(SCHEDULED_TASKS_KEY)
     const tasks = stored[SCHEDULED_TASKS_KEY] || []
     const wanted = new Set()
+    const scheduledTasksAllowed = !(await getPolicy()).DisableScheduledTasks
     for (const task of tasks) {
-        if (!task.enabled) continue
+        if (!task.enabled || !scheduledTasksAllowed) continue
         // TaskScheduler (agent/task-scheduler.js) knows every cadence: a periodic alarm for
         // "every N minutes", a one-shot `when` for daily/weekly/monthly.
         const info = TaskScheduler.alarmInfo(task)
@@ -423,6 +490,10 @@ async function rebuildScheduledAlarms() {
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (!alarm.name.startsWith(ALARM_PREFIX)) return
+    if ((await getPolicy()).DisableScheduledTasks) {
+        await chrome.alarms.clear(alarm.name)
+        return
+    }
     const taskId = alarm.name.slice(ALARM_PREFIX.length)
     const stored = await chrome.storage.local.get(SCHEDULED_TASKS_KEY)
     const tasks = stored[SCHEDULED_TASKS_KEY] || []
@@ -862,6 +933,9 @@ async function runAgentAction(action, tab) {
             return { success: true }
 
         case 'execute_js':
+            if ((await getPolicy()).DisableExecuteJs) {
+                return fail(ERR.POLICY, 'Running JavaScript in pages is disabled by your organization')
+            }
             // The one action that has to run in the page's own world: it is the model asking
             // to evaluate arbitrary code there. Everything else stays isolated so the page
             // cannot lie to the agent by patching DOM APIs.
@@ -1616,5 +1690,5 @@ async function openAgentForTab(tabId) {
 
 // Exposed for the unit tests, which load this file into a vm context with a stubbed `chrome`.
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { isBlockedSite, isFinancialSite, hostMatches, isHttpUrl, matchesPattern, dialogAnswer, mapKey, ERR }
+    module.exports = { isBlockedSite, isFinancialSite, hostMatches, isHttpUrl, matchesPattern, dialogAnswer, normalizePolicy, policyBlocksHost, policyIsSet, mapKey, ERR }
 }

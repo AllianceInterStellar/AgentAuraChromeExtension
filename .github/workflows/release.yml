@@ -95,7 +95,7 @@ jobs:
           name="agentaura-chrome-extension-${version}.zip"
           staging="$RUNNER_TEMP/pkg"
           mkdir -p "$staging"
-          cp -R manifest.json popup.html sidepanel.html css icons js pages LICENSE "$staging/"
+          cp -R manifest.json managed_schema.json popup.html sidepanel.html css icons js pages LICENSE "$staging/"
           # manifest.json has to sit at the root of the zip, not inside a folder.
           (cd "$staging" && zip -qr "$GITHUB_WORKSPACE/$name" . -x '*.DS_Store')
           echo "name=$name" >> "$GITHUB_OUTPUT"
@@ -126,6 +126,7 @@ jobs:
               m.background?.service_worker,
               m.side_panel?.default_path,
               m.options_page,
+              m.storage?.managed_schema,
               ...Object.values(m.icons ?? {}),
               ...Object.values(m.action?.default_icon ?? {}),
               ...(m.content_scripts ?? []).flatMap(c => c.js ?? []),

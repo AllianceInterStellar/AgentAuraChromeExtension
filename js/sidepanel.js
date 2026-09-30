@@ -95,6 +95,8 @@ const sidepanel = (() => {
     let runMaxDurationMs = 10 * 60 * 1000
     /** The scheduled task this run is for, so its outcome can be recorded and notified. */
     let currentScheduledTask = null
+    /** The organization's managed policy (chrome.storage.managed), normalised by the worker. */
+    let policy = { AllowedSites: [], BlockedSites: [], AllowedPermissionModes: [], DisableExecuteJs: false, DisableScheduledTasks: false, DisableUnattendedRuns: false }
     /** The "/" palette: saved shortcuts filtered by what follows the slash. */
     let paletteOpen = false
     const SLASH_COMMANDS = new Set(['/vision-test', '/diag'])
@@ -135,6 +137,7 @@ const sidepanel = (() => {
         await shortcutsManager.init()
         await taskScheduler.init()
         await loadSettings()
+        await loadPolicy()
 
         permissionManager.onApprovalNeeded = showActionApproval
         permissionManager.onPlanApproval = showPlanApproval
@@ -152,7 +155,7 @@ const sidepanel = (() => {
         }
 
         bindUIEvents()
-        applyPermissionMode(permissionManager.mode)
+        applyPermissionMode(permissionManager.effectiveMode())
         await loadClaws()
         renderMessages()
         renderScheduledTasks()
@@ -180,11 +183,15 @@ const sidepanel = (() => {
         })
 
         chrome.storage.onChanged.addListener((changes, area) => {
+            if (area === 'managed') {
+                loadPolicy()
+                return
+            }
             if (area !== 'local') return
             if (changes.agent_settings) loadSettings()
             if (changes.agent_permission_mode) {
                 permissionManager.mode = changes.agent_permission_mode.newValue || 'ask'
-                applyPermissionMode(permissionManager.mode)
+                applyPermissionMode(permissionManager.effectiveMode())
             }
         })
 
@@ -196,6 +203,25 @@ const sidepanel = (() => {
                 handleScheduledTaskExec(pending.task)
             }
         } catch (_) { }
+    }
+
+    /**
+     * What the administrator decided, applied to the mode buttons: a mode outside the allowed
+     * list cannot be picked and says why. Nothing is managed on an ordinary install.
+     */
+    async function loadPolicy() {
+        try {
+            const res = await chrome.runtime.sendMessage({ type: 'GET_POLICY' })
+            if (res && res.policy) policy = res.policy
+        } catch (_) { }
+        permissionManager.setPolicy(policy)
+        $$('.sp-perm-btn').forEach(btn => {
+            const allowed = permissionManager.isModeAllowed(btn.dataset.mode)
+            btn.disabled = !allowed
+            btn.classList.toggle('managed', !allowed)
+            if (!allowed) btn.title = I18n.t('perm.managed')
+        })
+        applyPermissionMode(permissionManager.effectiveMode())
     }
 
     async function loadSettings() {
@@ -281,6 +307,7 @@ const sidepanel = (() => {
         $$('.sp-perm-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const mode = btn.dataset.mode
+                if (!permissionManager.isModeAllowed(mode)) return
                 permissionManager.setMode(mode)
                 applyPermissionMode(mode)
             })
@@ -2214,7 +2241,8 @@ const sidepanel = (() => {
         addSystemMessage(I18n.t('sys.taskExecuting', { name: task.name }))
         // Nobody may be watching when an alarm fires. Unless the task was marked as allowed
         // to run unattended, this run asks before every action whatever the stored mode is.
-        if (task.allowUnattended !== true && permissionManager.mode !== 'ask') {
+        const unattended = task.allowUnattended === true && !policy.DisableUnattendedRuns
+        if (!unattended && permissionManager.effectiveMode() !== 'ask') {
             pendingRunModeOverride = 'ask'
             addSystemMessage(I18n.t('sys.taskAskMode', { name: task.name }))
         }

@@ -36,6 +36,8 @@ class PermissionManager {
         this.siteAllow = new Set()
         /** The `{ url, financial }` the pending approval was asked with. */
         this.pendingContext = null
+        /** Modes the organization allows (chrome.storage.managed); empty means all. */
+        this.allowedModes = []
         try {
             chrome.storage.onChanged.addListener((changes, area) => {
                 if (area === 'local' && changes[PermissionManager.SITE_ALLOW_KEY]) {
@@ -88,14 +90,34 @@ class PermissionManager {
     }
 
     async setMode(mode) {
-        if (!PermissionManager.MODES.includes(mode)) return
+        if (!PermissionManager.MODES.includes(mode) || !this.isModeAllowed(mode)) return
         this.mode = mode
         await chrome.storage.local.set({ agent_permission_mode: mode })
     }
 
+    /**
+     * Modes an administrator allows. A stored mode outside the list is not used: the closest
+     * allowed one is, `ask` first. The list is empty when nothing is managed.
+     */
+    setPolicy(policy) {
+        const modes = policy && Array.isArray(policy.AllowedPermissionModes) ? policy.AllowedPermissionModes : []
+        this.allowedModes = modes.filter(m => PermissionManager.MODES.includes(m))
+    }
+
+    isModeAllowed(mode) {
+        return this.allowedModes.length === 0 || this.allowedModes.includes(mode)
+    }
+
+    /** `mode`, or the allowed mode that stands in for it. */
+    clampMode(mode) {
+        if (this.isModeAllowed(mode)) return mode
+        return this.allowedModes.includes('ask') ? 'ask' : this.allowedModes[0]
+    }
+
     /** The mode this run actually uses. */
     effectiveMode() {
-        return PermissionManager.MODES.includes(this.runModeOverride) ? this.runModeOverride : this.mode
+        const wanted = PermissionManager.MODES.includes(this.runModeOverride) ? this.runModeOverride : this.mode
+        return this.clampMode(wanted)
     }
 
     /** Start of a run: nothing approved yet, and the run's mode override if it has one. */

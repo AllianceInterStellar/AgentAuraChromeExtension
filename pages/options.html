@@ -200,6 +200,33 @@
             margin-top: 12px;
         }
 
+        .hidden {
+            display: none !important;
+        }
+
+        .managed-notice {
+            margin: 0 0 16px;
+            padding: 10px 12px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            background: var(--bg2);
+            color: var(--text2);
+            font-size: 12px;
+        }
+
+        .perm-mode.managed {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .managed-only {
+            display: none;
+        }
+
+        .managed-off .managed-only {
+            display: block;
+        }
+
         .setting-row-stacked {
             flex-direction: column;
             align-items: stretch;
@@ -334,6 +361,7 @@
 <body>
     <h1 data-i18n="options.title">AgentAura Settings</h1>
     <p class="subtitle" data-i18n="options.subtitle">Configure your browser automation agent</p>
+    <div class="managed-notice hidden" id="managed-notice" role="note" data-i18n="options.managedNotice">Some of these settings are set by your organization and cannot be changed here.</div>
 
     <div class="section">
         <div class="section-title" data-i18n="options.permMode">Default Permission Mode</div>
@@ -469,8 +497,9 @@
         </div>
     </div>
 
-    <div class="section">
+    <div class="section" id="tasks-section">
         <div class="section-title" data-i18n="options.tasks">Scheduled Tasks</div>
+        <p class="setting-desc managed-only" data-i18n="options.tasksManagedOff">Scheduled tasks are disabled by your organization.</p>
         <div class="tasks-list" id="tasks-list">
             <div style="color: var(--text3); font-size: 12px; text-align: center; padding: 20px;" data-i18n="ui.loading">Loading...</div>
         </div>

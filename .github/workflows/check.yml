@@ -62,6 +62,7 @@ jobs:
               m.background?.service_worker,
               m.side_panel?.default_path,
               m.options_page,
+              m.storage?.managed_schema,
               ...Object.values(m.icons ?? {}),
               ...Object.values(m.action?.default_icon ?? {}),
               ...(m.content_scripts ?? []).flatMap(c => [...(c.js ?? []), ...(c.css ?? [])]),

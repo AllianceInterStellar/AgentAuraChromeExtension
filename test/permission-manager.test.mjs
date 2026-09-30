@@ -244,3 +244,33 @@ test('the approval hook receives the context the action was asked with', async (
     assert.deepEqual(seen.ctx, { url: 'https://a.com/', financial: false })
     assert.equal(seen.action.type, 'click')
 })
+
+test('an administrator\'s mode list clamps the stored mode and refuses others', async () => {
+    const pm = manager('act', () => 'approve')
+    pm.setPolicy({ AllowedPermissionModes: ['ask', 'plan'] })
+    assert.equal(pm.isModeAllowed('act'), false)
+    assert.equal(pm.isModeAllowed('ask'), true)
+    assert.equal(pm.effectiveMode(), 'ask', 'act is stored but not allowed, so ask stands in')
+    assert.equal(pm.clampMode('plan'), 'plan')
+
+    const before = plain(await context.chrome.storage.local.get('agent_permission_mode'))
+    await pm.setMode('act')
+    assert.equal(pm.mode, 'act', 'the stored value is left alone')
+    assert.deepEqual(plain(await context.chrome.storage.local.get('agent_permission_mode')), before, 'and not written')
+    await pm.setMode('plan')
+    assert.equal(pm.mode, 'plan')
+
+    let asked = 0
+    pm.onApprovalNeeded = () => { asked++; pm.approve() }
+    pm.mode = 'act'
+    await pm.checkPermission({ type: 'click', selector: '#a' })
+    assert.equal(asked, 1, 'a run under a clamped mode asks')
+
+    pm.setPolicy({ AllowedPermissionModes: ['act'] })
+    assert.equal(pm.effectiveMode(), 'act')
+    pm.setPolicy({ AllowedPermissionModes: ['plan'] })
+    pm.mode = 'act'
+    assert.equal(pm.effectiveMode(), 'plan', 'without ask in the list the first allowed mode stands in')
+    pm.setPolicy({})
+    assert.equal(pm.effectiveMode(), 'act', 'no policy, no clamp')
+})

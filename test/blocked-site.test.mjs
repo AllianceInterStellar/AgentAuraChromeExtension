@@ -125,6 +125,45 @@ test('hostMatches: exact host or subdomain, tolerant of a pasted URL', () => {
     assert.equal(hostMatches('', ['example.com']), false)
 })
 
+test('normalizePolicy: the administrator\'s values in the shape the code reads, junk dropped', () => {
+    const { normalizePolicy, policyIsSet } = exports['js/background.js']
+    const empty = normalizePolicy(undefined)
+    assert.deepEqual([...empty.AllowedSites], [])
+    assert.equal(empty.DisableExecuteJs, false)
+    assert.equal(policyIsSet(empty), false)
+
+    const p = normalizePolicy({
+        AllowedSites: ['Example.com', 'https://Intranet.corp/path', '', 'bad host!', null],
+        BlockedSites: ['facebook.com'],
+        AllowedPermissionModes: ['ASK', 'plan', 'yolo', 7],
+        DisableExecuteJs: true,
+        DisableScheduledTasks: 'yes',
+        DisableUnattendedRuns: false,
+    })
+    assert.deepEqual([...p.AllowedSites], ['example.com', 'intranet.corp'])
+    assert.deepEqual([...p.BlockedSites], ['facebook.com'])
+    assert.deepEqual([...p.AllowedPermissionModes], ['ask', 'plan'])
+    assert.equal(p.DisableExecuteJs, true)
+    assert.equal(p.DisableScheduledTasks, false, 'only a real true counts')
+    assert.equal(policyIsSet(p), true)
+    assert.equal(policyIsSet(normalizePolicy({ DisableUnattendedRuns: true })), true)
+})
+
+test('policyBlocksHost: blocked sites always, and everything else when an allow list exists', () => {
+    const { normalizePolicy, policyBlocksHost } = exports['js/background.js']
+    const none = normalizePolicy({})
+    assert.equal(policyBlocksHost('example.com', none), false)
+    const blocked = normalizePolicy({ BlockedSites: ['facebook.com'] })
+    assert.equal(policyBlocksHost('www.facebook.com', blocked), true)
+    assert.equal(policyBlocksHost('example.com', blocked), false)
+    const allowOnly = normalizePolicy({ AllowedSites: ['corp.example'] })
+    assert.equal(policyBlocksHost('wiki.corp.example', allowOnly), false)
+    assert.equal(policyBlocksHost('news.ycombinator.com', allowOnly), true)
+    const both = normalizePolicy({ AllowedSites: ['corp.example'], BlockedSites: ['hr.corp.example'] })
+    assert.equal(policyBlocksHost('hr.corp.example', both), true, 'a blocked site inside the allowed one stays blocked')
+    assert.equal(policyBlocksHost('', both), false)
+})
+
 test('dialogAnswer: an alert is dismissed, everything else is declined', () => {
     const { dialogAnswer } = exports['js/background.js']
     // Objects made inside the vm have another realm's prototype; compare the field.
@@ -144,6 +183,7 @@ test('the worker exports what the tests and the side panel rely on', () => {
     assert.equal(api.ERR.SENSITIVE_FIELD, 'SENSITIVE_FIELD')
     assert.equal(api.ERR.INVALID_URL, 'INVALID_URL')
     assert.equal(api.ERR.TIMEOUT, 'TIMEOUT')
+    assert.equal(api.ERR.POLICY, 'POLICY')
     for (const [name, code] of Object.entries(api.ERR)) {
         assert.equal(name, code, 'error codes read the same as their names')
     }

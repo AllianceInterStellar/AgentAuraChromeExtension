@@ -38,6 +38,9 @@
         "default_path": "sidepanel.html"
     },
     "options_page": "pages/options.html",
+    "storage": {
+        "managed_schema": "managed_schema.json"
+    },
     "commands": {
         "_execute_side_panel": {
             "suggested_key": {

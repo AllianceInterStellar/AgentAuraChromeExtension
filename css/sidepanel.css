@@ -1293,3 +1293,10 @@ h4.sp-md-heading {
     margin-top: 2px;
     flex: none;
 }
+
+/* A permission mode the organization does not allow. */
+.sp-perm-btn.managed,
+.sp-perm-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}

@@ -55,6 +55,28 @@ agent asks for one, not on every turn; the old behaviour is a switch in Settings
 A visual indicator is injected into any page the agent is acting on, so an automated click is
 never mistaken for one of yours.
 
+## Managed deployments
+
+An administrator can pin some of this down for a whole organization through Chrome's
+managed storage (`chrome.storage.managed`; the keys are declared in `managed_schema.json` and
+pushed with the extension policy, `3rdparty` → extension id → `policy`):
+
+| Key | Effect |
+|---|---|
+| `AllowedSites` | Hostnames (subdomains included). When set, the agent acts on these sites only. |
+| `BlockedSites` | Hostnames added to the built-in blocklist; users cannot except them. |
+| `AllowedPermissionModes` | Any of `ask`, `act`, `plan`. Other modes cannot be selected. |
+| `DisableExecuteJs` | The `execute_js` action fails with a policy error. |
+| `DisableScheduledTasks` | No scheduled task runs. |
+| `DisableUnattendedRuns` | Every scheduled run asks before each action, whatever the task says. |
+
+```json
+{ "AllowedSites": ["corp.example"], "AllowedPermissionModes": ["ask", "plan"], "DisableExecuteJs": true }
+```
+
+The options page says when settings are managed. An install without managed storage behaves
+as before.
+
 ## Why the permissions are broad
 
 Chrome shows a blunt warning for this extension, and the reasons are real rather than

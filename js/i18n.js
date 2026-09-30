@@ -19,6 +19,7 @@ const I18n = (() => {
             'perm.act.title': 'Execute actions and show results',
             'perm.plan': 'Plan',
             'perm.plan.title': 'Show execution plan, execute after approval',
+            'perm.managed': 'Not allowed by your organization',
 
             // Agent status
             'agent.working': 'Agent working...',
@@ -409,6 +410,8 @@ const I18n = (() => {
             'options.remove': 'Remove',
             'options.screenshotEveryTurn': 'Screenshot Every Turn',
             'options.screenshotEveryTurnDesc': 'Send a screenshot with every model turn, not only when the element list is not enough or the agent asks for one',
+            'options.managedNotice': 'Some of these settings are set by your organization and cannot be changed here.',
+            'options.tasksManagedOff': 'Scheduled tasks are disabled by your organization.',
             'options.persistChat': 'Keep Chat History on This Device',
             'options.persistChatDesc': 'Save the side panel conversation in extension storage so it is there when the panel reopens. Off: nothing is kept between sessions',
             'options.limits': 'Limits',
@@ -567,6 +570,7 @@ const I18n = (() => {
             'perm.act.title': '直接执行操作并展示结果',
             'perm.plan': '计划',
             'perm.plan.title': '先展示执行计划，批准后执行',
+            'perm.managed': '你所在组织不允许此模式',
 
             // Agent status
             'agent.working': '智能体工作中...',
@@ -957,6 +961,8 @@ const I18n = (() => {
             'options.remove': '移除',
             'options.screenshotEveryTurn': '每轮都发送截图',
             'options.screenshotEveryTurnDesc': '每次模型回合都附带截图，而不只是在元素列表不够用或智能体主动请求时',
+            'options.managedNotice': '其中一些设置由你所在的组织统一管理，无法在此更改。',
+            'options.tasksManagedOff': '定时任务已被你所在的组织禁用。',
             'options.persistChat': '在本设备保留聊天记录',
             'options.persistChatDesc': '将侧边栏对话保存在扩展存储中，重新打开面板时仍在。关闭后会话之间不保留任何记录',
             'options.limits': '限制',

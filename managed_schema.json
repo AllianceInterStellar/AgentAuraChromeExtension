@@ -1,0 +1,38 @@
+{
+    "type": "object",
+    "properties": {
+        "AllowedSites": {
+            "title": "Sites the agent may act on",
+            "description": "Hostnames (subdomains included). When the list is not empty, every other site is off limits to the agent.",
+            "type": "array",
+            "items": { "type": "string" }
+        },
+        "BlockedSites": {
+            "title": "Sites the agent must never act on",
+            "description": "Hostnames (subdomains included), added to the built-in blocklist. Users cannot except them.",
+            "type": "array",
+            "items": { "type": "string" }
+        },
+        "AllowedPermissionModes": {
+            "title": "Permission modes users may choose",
+            "description": "Any of ask, act, plan. When the list is not empty, the other modes cannot be selected.",
+            "type": "array",
+            "items": { "type": "string", "enum": ["ask", "act", "plan"] }
+        },
+        "DisableExecuteJs": {
+            "title": "Forbid running JavaScript in pages",
+            "description": "The execute_js action fails with a policy error.",
+            "type": "boolean"
+        },
+        "DisableScheduledTasks": {
+            "title": "Forbid scheduled tasks",
+            "description": "No alarm is created and no scheduled task runs.",
+            "type": "boolean"
+        },
+        "DisableUnattendedRuns": {
+            "title": "Scheduled tasks always ask",
+            "description": "The \"run unattended\" option on a task is ignored; every scheduled run asks before each action.",
+            "type": "boolean"
+        }
+    }
+}

@@ -19,13 +19,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadSettings()
 })
 
+/** Modes the organization allows; empty when nothing is managed. */
+let allowedModes = []
+
 document.querySelectorAll('.perm-mode').forEach(el => {
     el.addEventListener('click', () => {
+        if (allowedModes.length && !allowedModes.includes(el.dataset.mode)) return
         document.querySelectorAll('.perm-mode').forEach(m => m.classList.remove('active'))
         el.classList.add('active')
         currentMode = el.dataset.mode
     })
 })
+
+/** The administrator's policy, shown as a notice and as greyed-out choices. */
+async function loadPolicy() {
+    let policy = null
+    let managed = false
+    try {
+        const res = await chrome.runtime.sendMessage({ type: 'GET_POLICY' })
+        if (res && res.policy) { policy = res.policy; managed = !!res.managed }
+    } catch (_) { }
+    allowedModes = policy ? policy.AllowedPermissionModes : []
+    const notice = document.getElementById('managed-notice')
+    if (notice) notice.classList.toggle('hidden', !managed)
+    document.querySelectorAll('.perm-mode').forEach(m => {
+        const allowed = !allowedModes.length || allowedModes.includes(m.dataset.mode)
+        m.classList.toggle('managed', !allowed)
+        m.title = allowed ? '' : I18n.t('perm.managed')
+    })
+    if (allowedModes.length && !allowedModes.includes(currentMode)) {
+        currentMode = allowedModes.includes('ask') ? 'ask' : allowedModes[0]
+        document.querySelectorAll('.perm-mode').forEach(m => m.classList.toggle('active', m.dataset.mode === currentMode))
+    }
+    const tasksSection = document.getElementById('tasks-section')
+    if (tasksSection) tasksSection.classList.toggle('managed-off', !!(policy && policy.DisableScheduledTasks))
+}
 
 document.getElementById('btn-save').addEventListener('click', saveSettings)
 
@@ -61,6 +89,7 @@ async function loadSettings() {
     renderShortcuts(stored.agent_shortcuts || [])
     renderTasks(stored.agent_scheduled_tasks || [])
     renderAllowedSites(stored.agent_site_allow || [])
+    await loadPolicy()
 }
 
 /** Hostnames, one per line or comma-separated, lower-cased, without scheme or path, deduplicated. */

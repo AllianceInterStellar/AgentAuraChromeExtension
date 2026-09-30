@@ -130,6 +130,18 @@ test('keyboard shortcuts stay off the browser\'s own Ctrl+E and Ctrl+Shift+A', (
     }
 })
 
+test('the managed storage schema is registered, exists and is valid JSON with the documented keys', () => {
+    assert.equal(manifest.storage?.managed_schema, 'managed_schema.json')
+    const schema = JSON.parse(read('managed_schema.json'))
+    assert.equal(schema.type, 'object')
+    assert.deepEqual(Object.keys(schema.properties).sort(), [
+        'AllowedPermissionModes', 'AllowedSites', 'BlockedSites', 'DisableExecuteJs', 'DisableScheduledTasks', 'DisableUnattendedRuns',
+    ])
+    // Every key the schema offers is one the worker reads.
+    const worker = read(manifest.background.service_worker)
+    for (const key of Object.keys(schema.properties)) assert.ok(worker.includes(key), `${key} is in the schema but the worker never reads it`)
+})
+
 test('the worker registered in the manifest imports i18n and the scheduler, and both files exist', () => {
     const worker = read(manifest.background.service_worker)
     const m = /importScripts\(([^)]*)\)/.exec(worker)
