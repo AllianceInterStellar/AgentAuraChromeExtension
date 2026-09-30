@@ -143,8 +143,4 @@ class SkillInstaller {
         return this._installedClaws.get(clawId) === SKILL_VERSION
     }
 
-    async clearCache() {
-        this._installedClaws.clear()
-        await this._saveState()
-    }
 }

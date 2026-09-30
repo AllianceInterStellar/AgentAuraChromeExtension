@@ -51,9 +51,4 @@ class ShortcutsManager {
         return this.shortcuts
     }
 
-    getMostUsed(limit = 5) {
-        return [...this.shortcuts]
-            .sort((a, b) => b.uses - a.uses)
-            .slice(0, limit)
-    }
 }

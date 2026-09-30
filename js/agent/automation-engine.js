@@ -1,9 +1,7 @@
 class AutomationEngine {
     constructor() {
-        this.isRunning = false
         this.currentStep = 0
-        this.totalSteps = 0
-        this.actionHistory = []
+        /** The tab the run drives; the side panel pins it at run start. */
         this.activeTabId = null
         this.aborted = false
     }
@@ -26,36 +24,20 @@ class AutomationEngine {
         }
 
         this.currentStep++
-        const entry = { step: this.currentStep, action, status: 'running', timestamp: Date.now() }
-        this.actionHistory.push(entry)
-
-        try {
-            const result = await chrome.runtime.sendMessage({
-                type: 'AGENT_EXECUTE_ACTION',
-                action,
-                tabId: this.activeTabId
-            })
-            entry.status = result && result.success ? 'completed' : 'failed'
-            entry.result = result
-            return result
-        } catch (err) {
-            entry.status = 'failed'
-            entry.error = err.message
-            throw err
-        }
+        return await chrome.runtime.sendMessage({
+            type: 'AGENT_EXECUTE_ACTION',
+            action,
+            tabId: this.activeTabId
+        })
     }
 
     stop() {
         this.aborted = true
-        this.isRunning = false
     }
 
     /** Called at the start of every run. Without it, one Stop poisoned every later action. */
     reset() {
-        this.isRunning = false
         this.currentStep = 0
-        this.totalSteps = 0
-        this.actionHistory = []
         this.aborted = false
     }
 

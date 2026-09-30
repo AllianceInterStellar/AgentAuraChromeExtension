@@ -209,32 +209,6 @@
         }
     }
 
-    function showClickIndicator(x, y) {
-        const el = document.createElement('div')
-        el.className = 'aa-click-indicator'
-        el.style.left = (Number(x) || 0) + 'px'
-        el.style.top = (Number(y) || 0) + 'px'
-        document.documentElement.appendChild(el)
-        setTimeout(() => el.remove(), 600)
-    }
-
-    function highlightElement(selector) {
-        try {
-            const el = document.querySelector(selector)
-            if (!el) return
-
-            const rect = el.getBoundingClientRect()
-            const overlay = document.createElement('div')
-            overlay.className = 'aa-highlight-overlay'
-            overlay.style.left = rect.left + 'px'
-            overlay.style.top = rect.top + 'px'
-            overlay.style.width = rect.width + 'px'
-            overlay.style.height = rect.height + 'px'
-            document.documentElement.appendChild(overlay)
-            setTimeout(() => overlay.remove(), 1500)
-        } catch (e) { }
-    }
-
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         switch (message.type) {
             case 'INDICATOR_SHOW':
@@ -255,14 +229,6 @@
                 break
             case 'INDICATOR_TIMELINE':
                 addTimelineItem(message.icon || (message.success ? '✓' : '!'), message.text || message.action || '', message.status || (message.success ? 'done' : 'failed'))
-                sendResponse({ success: true })
-                break
-            case 'INDICATOR_CLICK':
-                showClickIndicator(message.x, message.y)
-                sendResponse({ success: true })
-                break
-            case 'INDICATOR_HIGHLIGHT':
-                highlightElement(message.selector)
                 sendResponse({ success: true })
                 break
         }

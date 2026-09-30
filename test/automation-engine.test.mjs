@@ -116,5 +116,4 @@ test('stop() then reset() lets the engine run again', async () => {
     engine.reset()
     assert.equal(engine.aborted, false)
     assert.equal(engine.currentStep, 0)
-    assert.deepEqual([...engine.actionHistory], [])
 })

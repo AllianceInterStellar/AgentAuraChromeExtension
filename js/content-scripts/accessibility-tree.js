@@ -22,13 +22,6 @@
         return ref.deref() || null
     }
 
-    function getElementRect(refId) {
-        const el = getElementByRefId(refId)
-        if (!el) return null
-        const rect = el.getBoundingClientRect()
-        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: rect.top, left: rect.left }
-    }
-
     // Hard ceilings so a very large page (an endless feed, a huge table) cannot hold the main
     // thread for seconds. The result says when it was cut short.
     const MAX_VISITED_NODES = 5000
@@ -349,10 +342,7 @@
     }
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.type === 'GET_ACCESSIBILITY_TREE') {
-            const tree = buildAccessibilityTree(document.body, message.maxDepth || 8, message.filter || 'all')
-            sendResponse({ success: true, tree })
-        } else if (message.type === 'GET_PAGE_STRUCTURE') {
+        if (message.type === 'GET_PAGE_STRUCTURE') {
             const structure = getPageStructure()
             sendResponse({ success: true, structure })
         } else if (message.type === 'GET_PAGE_CONTENT') {
@@ -436,13 +426,6 @@
                 el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
                 el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
                 sendResponse({ success: true })
-            }
-        } else if (message.type === 'GET_ELEMENT_RECT') {
-            const rect = getElementRect(message.refId)
-            if (!rect) {
-                sendResponse({ success: false, code: 'ELEMENT_NOT_FOUND', error: `Element [${message.refId}] not found` })
-            } else {
-                sendResponse({ success: true, rect })
             }
         }
     })
