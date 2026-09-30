@@ -13,11 +13,11 @@
     "integration": "node full-integration-test.mjs"
   },
   "dependencies": {
-    "https-proxy-agent": "^8.0.0",
-    "pg": "^8.20.0",
-    "playwright": "^1.58.2",
-    "socks-proxy-agent": "^9.0.0",
+    "https-proxy-agent": "^9.1.0",
+    "pg": "^8.23.0",
+    "playwright": "^1.63.0",
+    "socks-proxy-agent": "^10.1.0",
     "ssh2": "^1.17.0",
-    "ws": "^8.19.0"
+    "ws": "^8.22.0"
   }
 }
