@@ -26,8 +26,8 @@ jobs:
     steps:
       # TODO: pin every `uses:` to a commit SHA (`actions/checkout@<sha> # v4`) once the SHAs
       # can be verified against the upstream repositories; a tag can be moved, a SHA cannot.
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -172,7 +172,7 @@ jobs:
       # TODO pin: actions/cache@<sha> # v4
       - name: Cache the Playwright browser
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ env.PLAYWRIGHT_VERSION }}-${{ runner.os }}-chromium
