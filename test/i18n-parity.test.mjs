@@ -158,6 +158,13 @@ test('every key a script asks for by literal exists in en', () => {
     assert.deepEqual(missing, [])
 })
 
+test('a replacement pattern in a parameter is inserted literally', () => {
+    const { run } = loadScripts(['js/utils.js', 'js/i18n.js'])
+    run("I18n.setLang('en')")
+    assert.equal(run("I18n.t('sys.actionFailed', { error: 'cost $& and $1' })"), 'Action failed: cost $& and $1')
+    assert.equal(run("I18n.t('sys.actionFailed', { error: undefined })"), 'Action failed: ')
+})
+
 test('the loaded module agrees with the tables and interpolates', () => {
     const { run } = loadScripts(['js/i18n.js'])
     assert.equal(run(`I18n.t('agent.step', { current: 2, total: 5 })`), en['agent.step'].replace('{current}', '2').replace('{total}', '5'))

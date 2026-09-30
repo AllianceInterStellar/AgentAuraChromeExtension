@@ -49,6 +49,7 @@ async function loadSettings() {
     document.getElementById('setting-tab-group').checked = settings.tabGroupEnabled !== false
     document.getElementById('setting-screenshot-every-turn').checked = settings.screenshotEveryTurn === true
     document.getElementById('setting-financial-confirm').checked = settings.financialConfirmEnabled !== false
+    document.getElementById('setting-persist-chat').checked = settings.persistChatHistory !== false
     document.getElementById('setting-extra-blocked').value = hostList(settings.extraBlockedHosts).join('\n')
     document.getElementById('setting-allowed-hosts').value = hostList(settings.allowedHosts).join('\n')
     document.getElementById('setting-max-steps').value = settings.maxSteps || 50
@@ -86,6 +87,7 @@ async function saveSettings() {
             tabGroupEnabled: document.getElementById('setting-tab-group').checked,
             screenshotEveryTurn: document.getElementById('setting-screenshot-every-turn').checked,
             financialConfirmEnabled: document.getElementById('setting-financial-confirm').checked,
+            persistChatHistory: document.getElementById('setting-persist-chat').checked,
             extraBlockedHosts: hostList(document.getElementById('setting-extra-blocked').value),
             allowedHosts: hostList(document.getElementById('setting-allowed-hosts').value),
             maxSteps: Number.isFinite(maxSteps) ? clamp(maxSteps, 1, 500) : 50,

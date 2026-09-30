@@ -756,7 +756,8 @@ async function handleClawAction(e) {
             case 'gateway': {
                 const subdomain = btn.dataset.subdomain
                 if (subdomain) {
-                    window.open(gatewayUrlFor(subdomain), '_blank', 'noopener')
+                    const gatewayUrl = gatewayUrlFor(subdomain)
+                    if (gatewayUrl) window.open(gatewayUrl, '_blank', 'noopener')
                 }
                 refresh = false
                 break
@@ -788,8 +789,11 @@ async function handleClawAction(e) {
     }
 }
 
+/** null when the subdomain is not a plain DNS label, so a server value cannot point elsewhere. */
 function gatewayUrlFor(subdomain) {
-    return `https://${subdomain}.${GATEWAY_DOMAIN}`
+    const label = String(subdomain || '').trim().toLowerCase()
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) return null
+    return `https://${label}.${GATEWAY_DOMAIN}`
 }
 
 function renderProviderGrid() {

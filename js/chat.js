@@ -683,7 +683,8 @@ class ChatManager {
         renderChatUI(session)
         scrollChatToBottom()
 
-        const gatewayUrl = claw.subdomain ? `https://${claw.subdomain}.${GATEWAY_DOMAIN}` : null
+        const label = String(claw.subdomain || '').trim().toLowerCase()
+        const gatewayUrl = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label) ? `https://${label}.${GATEWAY_DOMAIN}` : null
         if (!gatewayUrl) {
             this._updateLastAssistant(session, I18n.t('sys.gatewayFailed'), false, true)
             return

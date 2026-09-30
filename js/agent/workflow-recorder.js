@@ -77,7 +77,10 @@ class WorkflowRecorder {
                     return path.join(' > ')
                 }
 
+                // Only what the user did. A page can dispatch synthetic clicks and inputs, and
+                // those would have written the page's text into the replay prompt.
                 document.addEventListener('click', (e) => {
+                    if (!e.isTrusted) return
                     const target = e.target
                     if (!(target instanceof Element)) return
                     sendAction({
@@ -90,6 +93,7 @@ class WorkflowRecorder {
                 }, opts)
 
                 document.addEventListener('input', (e) => {
+                    if (!e.isTrusted) return
                     const target = e.target
                     if (!(target instanceof Element)) return
                     if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' && target.tagName !== 'SELECT') return

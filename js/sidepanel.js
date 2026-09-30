@@ -14,6 +14,12 @@ const sidepanel = (() => {
     let chatService = null
     let sessionKey = null
     let activeClaw = null
+    /** The claws GET /claws returned, by id. The gateway token stays here, not in the DOM. */
+    let clawsById = new Map()
+    /** Whether the chat is written to chrome.storage.local (a setting; on by default). */
+    let persistChatHistory = true
+    /** The most a claw's saved chat may take up. Beyond this the oldest messages go. */
+    const MAX_SAVED_BYTES = 512 * 1024
     let messages = []
     let isGenerating = false
     let isRecording = false
@@ -32,7 +38,7 @@ const sidepanel = (() => {
      */
     let currentRunId = 0
 
-    let MAX_AGENT_STEPS = 30
+    let MAX_AGENT_STEPS = 50
     const MAX_LLM_ROUNDS_FACTOR = 2
     const MAX_NATIVE_TOOL_RETRIES = 3
     const MAX_LOOP_DURATION_MS = 10 * 60 * 1000
@@ -198,6 +204,7 @@ const sidepanel = (() => {
             const steps = parseInt(stored.agent_settings?.maxSteps, 10)
             if (steps >= 1) MAX_AGENT_STEPS = steps
             screenshotEveryTurn = stored.agent_settings?.screenshotEveryTurn === true
+            persistChatHistory = stored.agent_settings?.persistChatHistory !== false
         } catch (_) { }
     }
 
@@ -363,22 +370,25 @@ const sidepanel = (() => {
 
             const statusLabel = { running: '', configuring: ` (${I18n.t('status.configuring')})`, starting: ` (${I18n.t('status.starting')})`, initializing: ` (${I18n.t('status.initializing')})`, stopped: ` (${I18n.t('status.stopped')})`, error: ` (${I18n.t('status.error')})` }
 
+            clawsById = new Map()
             claws.forEach(claw => {
                 const option = document.createElement('option')
                 option.value = claw.id
                 const s = (claw.status || '').toLowerCase()
                 const label = statusLabel[s] || ` (${s})`
                 option.textContent = (claw.name || claw.id) + (s === 'running' ? '' : label)
-                if (s === 'running' && claw.subdomain) {
-                    option.dataset.gatewayUrl = gatewayUrlFor(claw.subdomain)
-                    option.dataset.gatewayToken = claw.gatewayToken || ''
+                const gatewayUrl = s === 'running' ? gatewayUrlFor(claw.subdomain) : null
+                if (gatewayUrl) {
+                    // The token used to sit in the option's dataset, readable by anything that
+                    // could look at the DOM. It stays in this closure now.
+                    clawsById.set(String(claw.id), { id: String(claw.id), name: claw.name || claw.id, gatewayUrl, gatewayToken: claw.gatewayToken || '' })
                 } else {
                     option.disabled = true
                 }
                 select.appendChild(option)
             })
 
-            const runningClaws = claws.filter(c => (c.status || '').toLowerCase() === 'running' && c.subdomain)
+            const runningClaws = claws.filter(c => clawsById.has(String(c.id)))
 
             if (prevValue && select.querySelector(`option[value="${CSS.escape(prevValue)}"]:not(:disabled)`)) {
                 select.value = prevValue
@@ -396,9 +406,15 @@ const sidepanel = (() => {
         }
     }
 
+    /**
+     * The gateway a claw is reached at, or null when the subdomain is not a plain DNS label.
+     * A hostile subdomain such as `evil.example/` would otherwise have pointed the WebSocket,
+     * and the token in its connect frame, at another host. GATEWAY_DOMAIN comes from chat.js.
+     */
     function gatewayUrlFor(subdomain) {
-        // GATEWAY_DOMAIN comes from chat.js, loaded before this file.
-        return `https://${subdomain}.${GATEWAY_DOMAIN}`
+        const label = String(subdomain || '').trim().toLowerCase()
+        if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) return null
+        return `https://${label}.${GATEWAY_DOMAIN}`
     }
 
     async function handleClawChange() {
@@ -416,12 +432,12 @@ const sidepanel = (() => {
 
         if (activeClaw && activeClaw.id === selectedOption.value) return
 
-        activeClaw = {
-            id: selectedOption.value,
-            name: selectedOption.textContent,
-            gatewayUrl: selectedOption.dataset.gatewayUrl,
-            gatewayToken: selectedOption.dataset.gatewayToken
+        const claw = clawsById.get(selectedOption.value)
+        if (!claw) {
+            activeClaw = null
+            return
         }
+        activeClaw = { ...claw, name: selectedOption.textContent }
 
         if (chatService) {
             chatService.disconnect()
@@ -1595,12 +1611,25 @@ const sidepanel = (() => {
         const clawId = activeClaw.id
         clearTimeout(persistTimer)
         persistTimer = setTimeout(() => {
-            const saved = messages
+            if (!persistChatHistory) {
+                chrome.storage.local.remove(HISTORY_KEY_PREFIX + clawId).catch(() => { })
+                return
+            }
+            const saved = trimToBytes(messages
                 .filter(m => (m.role === 'user' || m.role === 'assistant') && !m.isStreaming)
                 .slice(-MAX_SAVED_MESSAGES)
-                .map(m => ({ id: m.id, role: m.role, content: m.content, isError: m.isError, timestamp: m.timestamp }))
+                .map(m => ({ id: m.id, role: m.role, content: m.content, isError: m.isError, timestamp: m.timestamp })), MAX_SAVED_BYTES)
             chrome.storage.local.set({ [HISTORY_KEY_PREFIX + clawId]: saved }).catch(() => { })
         }, 300)
+    }
+
+    /** The newest messages that fit in `maxBytes` of JSON; 200 messages can be megabytes when replies are long. */
+    function trimToBytes(list, maxBytes) {
+        let out = list
+        while (out.length > 1 && JSON.stringify(out).length > maxBytes) {
+            out = out.slice(Math.max(1, Math.ceil(out.length / 4)))
+        }
+        return out
     }
 
     async function restoreMessages(clawId) {

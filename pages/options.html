@@ -412,6 +412,16 @@
                 <span class="toggle-slider"></span>
             </label>
         </div>
+        <div class="setting-row">
+            <div class="setting-info">
+                <div class="setting-label" data-i18n="options.persistChat">Keep Chat History on This Device</div>
+                <div class="setting-desc" data-i18n="options.persistChatDesc">Save the side panel conversation in extension storage so it is there when the panel reopens. Off: nothing is kept between sessions</div>
+            </div>
+            <label class="toggle">
+                <input type="checkbox" id="setting-persist-chat" checked>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
     </div>
 
     <div class="section">
@@ -421,14 +431,14 @@
                 <div class="setting-label" data-i18n="options.maxSteps">Max Steps Per Task</div>
                 <div class="setting-desc" data-i18n="options.maxStepsDesc">Maximum actions the agent can take in a single task</div>
             </div>
-            <input type="number" id="setting-max-steps" value="50" min="5" max="200">
+            <input type="number" id="setting-max-steps" value="50" min="1" max="500">
         </div>
         <div class="setting-row">
             <div class="setting-info">
                 <div class="setting-label" data-i18n="options.screenshotQuality">Screenshot Quality</div>
                 <div class="setting-desc" data-i18n="options.screenshotQualityDesc">Quality percentage for captured screenshots</div>
             </div>
-            <input type="number" id="setting-screenshot-quality" value="80" min="20" max="100">
+            <input type="number" id="setting-screenshot-quality" value="80" min="10" max="100">
         </div>
     </div>
 

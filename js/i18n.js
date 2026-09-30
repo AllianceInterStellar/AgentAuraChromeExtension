@@ -134,7 +134,6 @@ const I18n = (() => {
             'sys.stoppedWithErrors': 'Stopped with errors',
             'sys.actionFailed': 'Action failed: {error}',
             'sys.actionError': 'Action error: {msg}',
-            'sys.maxRetries': 'Action still fails after multiple retries',
             'sys.maxRetriesFailed': 'Action still fails after multiple retries',
             'sys.retrying': '(retrying)',
             'sys.retryRecover': 'Action failed, recovering and retrying ({attempt}/{max}): {error}',
@@ -143,25 +142,17 @@ const I18n = (() => {
             'sys.screenshotFailed': 'Screenshot failed.',
             'sys.screenshotError': 'Screenshot error: {msg}',
             'sys.recorded': 'Recorded {count} actions ({time}).',
-            'sys.noRecorded': 'No actions recorded.',
             'sys.noRecording': 'No actions recorded.',
             'sys.noActiveTab': 'No active tab to record.',
-            'sys.recordStarted': 'Recording started. Operate on the page, then click the record button again to stop.',
             'sys.recordingStarted': 'Recording started. Operate on the page, then click the record button again to stop.',
             'sys.recordError': 'Recording error: {msg}',
-            'sys.noExport': 'Nothing to export.',
             'sys.noExportContent': 'Nothing to export.',
             'sys.exported': 'Chat exported.',
             'sys.exportError': 'Export error: {msg}',
-            'sys.emptyShortcut': 'Please enter a prompt before saving as shortcut.',
             'sys.enterPromptFirst': 'Please enter a prompt before saving as shortcut.',
             'sys.shortcutSaved': 'Shortcut saved.',
-            'sys.emptyTask': 'Please enter a task prompt.',
             'sys.enterTaskPrompt': 'Please enter a task prompt.',
-            'sys.taskAdded': 'Task added, runs every {interval} minutes.',
-            'sys.taskNoClaw': 'Scheduled task failed: no available instance.',
             'sys.taskNoInstance': 'Scheduled task failed: no available instance.',
-            'sys.taskRunning': '⏰ Running scheduled task: {name}',
             'sys.taskExecuting': '⏰ Running scheduled task: {name}',
             'sys.taskAskMode': 'Scheduled task "{name}" asks before every action. Tick "run unattended" on the task to use the current permission mode.',
             'sys.invalidTaskUrl': 'The start URL must begin with http:// or https://',
@@ -240,9 +231,6 @@ const I18n = (() => {
             'ctx.outputActionOrSummary': 'Based on the page info below, output the next action code block; or if the task is complete, output a text summary.',
             'ctx.previousReplySummary': 'Previous Reply Summary',
             'ctx.onlyReturnActionOrSummary': 'Please only return action code blocks or a final summary.',
-            'ctx.elementNotFound': 'Element not found',
-            'ctx.noResult': 'No result returned',
-            'ctx.getPageTextFailed': 'Failed to get page text',
 
             // Auth screen
             'auth.welcome': 'Welcome to AgentAura',
@@ -421,6 +409,8 @@ const I18n = (() => {
             'options.remove': 'Remove',
             'options.screenshotEveryTurn': 'Screenshot Every Turn',
             'options.screenshotEveryTurnDesc': 'Send a screenshot with every model turn, not only when the element list is not enough or the agent asks for one',
+            'options.persistChat': 'Keep Chat History on This Device',
+            'options.persistChatDesc': 'Save the side panel conversation in extension storage so it is there when the panel reopens. Off: nothing is kept between sessions',
             'options.limits': 'Limits',
             'options.maxSteps': 'Max Steps Per Task',
             'options.maxStepsDesc': 'Maximum actions the agent can take in a single task',
@@ -692,7 +682,6 @@ const I18n = (() => {
             'sys.stoppedWithErrors': '因错误停止',
             'sys.actionFailed': '操作失败: {error}',
             'sys.actionError': '操作错误: {msg}',
-            'sys.maxRetries': '操作多次重试后仍然失败',
             'sys.maxRetriesFailed': '操作多次重试后仍然失败',
             'sys.retrying': '（重试中）',
             'sys.retryRecover': '操作失败，正在恢复后重试（{attempt}/{max}）：{error}',
@@ -701,25 +690,17 @@ const I18n = (() => {
             'sys.screenshotFailed': '截图失败。',
             'sys.screenshotError': '截图错误: {msg}',
             'sys.recorded': '已录制 {count} 个操作 ({time})。',
-            'sys.noRecorded': '未录制到任何操作。',
             'sys.noRecording': '未录制到任何操作。',
             'sys.noActiveTab': '没有活跃标签页可录制。',
-            'sys.recordStarted': '录制已开始。在页面上操作，完成后再次点击录制按钮停止。',
             'sys.recordingStarted': '录制已开始。在页面上操作，完成后再次点击录制按钮停止。',
             'sys.recordError': '录制错误: {msg}',
-            'sys.noExport': '没有可导出的内容。',
             'sys.noExportContent': '没有可导出的内容。',
             'sys.exported': '对话已导出。',
             'sys.exportError': '导出错误: {msg}',
-            'sys.emptyShortcut': '请先输入提示词，再保存为快捷方式。',
             'sys.enterPromptFirst': '请先输入提示词，再保存为快捷方式。',
             'sys.shortcutSaved': '快捷方式已保存。',
-            'sys.emptyTask': '请输入任务提示词。',
             'sys.enterTaskPrompt': '请输入任务提示词。',
-            'sys.taskAdded': '定时任务已添加，每 {interval} 分钟执行一次。',
-            'sys.taskNoClaw': '定时任务执行失败: 没有可用实例。',
             'sys.taskNoInstance': '定时任务执行失败: 没有可用实例。',
-            'sys.taskRunning': '⏰ 执行定时任务: {name}',
             'sys.taskExecuting': '⏰ 执行定时任务: {name}',
             'sys.taskAskMode': '定时任务「{name}」每步操作前都会询问。若要沿用当前权限模式，请在任务上勾选「无人值守运行」。',
             'sys.invalidTaskUrl': '起始网址必须以 http:// 或 https:// 开头',
@@ -798,9 +779,6 @@ const I18n = (() => {
             'ctx.outputActionOrSummary': '请基于下面页面信息，直接输出下一步 action 代码块；如果任务已完成，则直接输出文字总结。',
             'ctx.previousReplySummary': '上一条回复摘要',
             'ctx.onlyReturnActionOrSummary': '请只返回 action 代码块或最终总结。',
-            'ctx.elementNotFound': '未找到元素',
-            'ctx.noResult': '无返回结果',
-            'ctx.getPageTextFailed': '获取页面文本失败',
 
             // Auth screen
             'auth.welcome': '欢迎使用 AgentAura',
@@ -979,6 +957,8 @@ const I18n = (() => {
             'options.remove': '移除',
             'options.screenshotEveryTurn': '每轮都发送截图',
             'options.screenshotEveryTurnDesc': '每次模型回合都附带截图，而不只是在元素列表不够用或智能体主动请求时',
+            'options.persistChat': '在本设备保留聊天记录',
+            'options.persistChatDesc': '将侧边栏对话保存在扩展存储中，重新打开面板时仍在。关闭后会话之间不保留任何记录',
             'options.limits': '限制',
             'options.maxSteps': '每个任务最大步数',
             'options.maxStepsDesc': '智能体在单个任务中可执行的最大操作数',
@@ -1487,7 +1467,10 @@ const I18n = (() => {
         let str = translations[currentLang]?.[key] || translations.en[key] || key
         if (params) {
             Object.keys(params).forEach((k) => {
-                str = str.replace(new RegExp('\\{' + k + '\\}', 'g'), params[k])
+                // A function, so `$&` or `$1` in a value the model or a page produced is
+                // inserted literally instead of being read as a replacement pattern.
+                const value = String(params[k] ?? '')
+                str = str.replace(new RegExp('\\{' + k + '\\}', 'g'), () => value)
             })
         }
         return str

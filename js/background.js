@@ -71,7 +71,9 @@ const DEFAULT_SETTINGS = {
     financialConfirmEnabled: true,
     /** Hostnames the user added to the blocklist, and hostnames excepted from it. */
     extraBlockedHosts: [],
-    allowedHosts: []
+    allowedHosts: [],
+    /** The side panel conversation is saved in chrome.storage.local between sessions. */
+    persistChatHistory: true
 }
 
 const TAB_GROUP_STATE_KEY = 'agent_tab_group_state'
@@ -346,44 +348,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     switch (message.type) {
-        case 'GET_AUTH_TOKEN':
-            chrome.storage.local.get('auth_id_token', (result) => {
-                sendResponse({ token: result.auth_id_token || null })
-            })
-            return true
-
         case 'OPEN_SIDE_PANEL':
             return respond(openAgentForCurrentTab(sender.tab?.id).then(() => ({ success: true })))
 
         case 'AGENT_EXECUTE_ACTION':
             return respond(handleAgentAction(message.action, message.tabId))
 
-        // The direct routes below all go through handleAgentAction so that the blocked-site
-        // check applies to them too.
-        case 'AGENT_EXECUTE_JS':
-            return respond(handleAgentAction({ type: 'execute_js', code: message.code || '' }, message.tabId))
-
-        case 'AGENT_GET_PAGE_TEXT':
-            return respond(handleAgentAction({ type: 'get_page_text' }, message.tabId))
-
+        // The panel's own screenshot of the run tab goes through handleAgentAction so that the
+        // blocked-site check applies to it too. The other direct routes (execute_js, page
+        // text, a raw tab-group create/add, a token read) had no callers and were one
+        // extension-page XSS away from arbitrary JavaScript in any tab; they are gone.
         case 'AGENT_TAKE_SCREENSHOT':
             return respond(handleAgentAction({ type: 'screenshot' }, message.tabId))
 
-        case 'ENSURE_CONTENT_SCRIPTS':
-            return respond(resolveTab(message.tabId).then(async tab => {
-                if (!tab) return fail(ERR.NO_TAB, 'No active tab')
-                await ensureContentScripts(tab.id)
-                return { success: true, tabId: tab.id }
-            }))
-
-        case 'TAB_GROUP_CREATE':
-            return respond(createTabGroup(message.tabIds, message.title).then(groupId => ({ success: true, groupId })))
-
         case 'TAB_GROUP_ENSURE':
             return respond(ensureTabGroup(message.tabId, message.title).then(result => ({ success: true, ...result })))
-
-        case 'TAB_GROUP_ADD':
-            return respond(addTabToGroup(message.tabId, message.groupId).then(groupId => ({ success: true, groupId })))
 
         case 'TAB_GROUP_LIST':
             return respond(listGroupTabs(message.tabId).then(result => ({ success: true, ...result })))
@@ -411,11 +390,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'TAKE_PENDING_SCHEDULED_TASK':
             return respond(takePendingScheduledTask(message.tabId))
-
-        case 'AGENT_NOTIFY':
-            notify(`agent-${Date.now()}`, message.title || 'AgentAura', message.message || '')
-            sendResponse({ success: true })
-            return true
     }
 
     sendResponse(fail(ERR.UNKNOWN_MESSAGE, `Unknown message type: ${message.type}`))

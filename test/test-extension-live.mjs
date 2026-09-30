@@ -497,7 +497,7 @@ async function main() {
         const messagingWorks = await sidepanelPage.evaluate(() => {
             return new Promise((resolve) => {
                 const timeout = setTimeout(() => resolve(false), 5000)
-                chrome.runtime.sendMessage({ type: 'GET_AUTH_TOKEN' }, (response) => {
+                chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (response) => {
                     clearTimeout(timeout)
                     resolve(response !== undefined)
                 })
