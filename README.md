@@ -19,8 +19,10 @@ on an agent gateway you deploy, and this extension is the pair of hands.
   pages that ignore synthetic events. Every action's result is sent back to the model.
 - **An accessibility-tree view of the page** rather than raw HTML, so the model sees the
   structure a screen reader would instead of a megabyte of markup.
-- **Workflow recording** — capture what you did once, replay it as a saved shortcut.
-- **Scheduled tasks** that run on an alarm and report back.
+- **Workflow recording** — capture what you did once, replay it as a saved shortcut. Type `/`
+  in the chat box to pick a saved shortcut.
+- **Scheduled tasks**: every N minutes, or daily, weekly or monthly at a time you choose, with a
+  start page, their own step limit, a run log and a notification when a run finishes.
 - **Skill installation** onto the connected agent.
 - UI in English and Simplified Chinese, fully translated. Twelve more languages (ar, de, es,
   es-419, fr, it, ja, ko, pl, pt-BR, ru, tr) are offered as well, but they currently translate
@@ -38,14 +40,17 @@ not buried in a settings page:
 | **Act Before Asking** | The agent acts, then shows you what it did. |
 | **Follow a Plan** | The agent presents a plan and executes it once you approve. |
 
-Whatever the mode, two things always ask first: running JavaScript in the page
-(`execute_js`, with the code shown on the card), and typing into a field that looks like a
+Whatever the mode, some things always ask first: running JavaScript in the page
+(`execute_js`, with the code shown on the card), typing into a field that looks like a
 password, one-time code or card number (the field is named on the card, and its current value
-is never sent to the model). "Approve all" on the card covers the rest of that task, not every
-task from then on. A scheduled task asks before every action unless it was created with "run
-unattended", because nobody may be watching when its alarm fires. Screenshots go to the model
-when the element list cannot carry the page or when the agent asks for one, not on every
-turn; the old behaviour is a switch in Settings.
+is never sent to the model), any download the agent's actions set off, and any change on a
+payment or finance page. "Approve all" on the card covers the rest of that task, not every
+task from then on; "Always allow on this site" lets a site run without asking, and the list
+is reviewed in Settings. The agent stops and hands the page to you at sign-in forms and
+CAPTCHAs, and after three failed attempts in a row. A scheduled task asks before every action
+unless it was created with "run unattended", because nobody may be watching when its alarm
+fires. Screenshots go to the model when the element list cannot carry the page or when the
+agent asks for one, not on every turn; the old behaviour is a switch in Settings.
 
 A visual indicator is injected into any page the agent is acting on, so an automated click is
 never mistaken for one of yours.

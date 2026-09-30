@@ -1,6 +1,6 @@
 // The service worker has no DOM, but it does show notifications, so it needs the same strings
 // as the pages. i18n.js only touches `document` inside applyToPage, which is never called here.
-importScripts('i18n.js')
+importScripts('i18n.js', 'agent/task-scheduler.js')
 
 /**
  * Stable error codes. The side panel decides whether an action is worth retrying by looking at
@@ -431,9 +431,13 @@ async function rebuildScheduledAlarms() {
     const tasks = stored[SCHEDULED_TASKS_KEY] || []
     const wanted = new Set()
     for (const task of tasks) {
-        if (!task.enabled || !(task.intervalMinutes >= 1)) continue
+        if (!task.enabled) continue
+        // TaskScheduler (agent/task-scheduler.js) knows every cadence: a periodic alarm for
+        // "every N minutes", a one-shot `when` for daily/weekly/monthly.
+        const info = TaskScheduler.alarmInfo(task)
+        if (!info) continue
         wanted.add(ALARM_PREFIX + task.id)
-        await chrome.alarms.create(ALARM_PREFIX + task.id, { periodInMinutes: task.intervalMinutes })
+        await chrome.alarms.create(ALARM_PREFIX + task.id, info)
     }
     const existing = await chrome.alarms.getAll()
     for (const alarm of existing) {
@@ -456,6 +460,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     task.lastRun = Date.now()
     task.runCount = (task.runCount || 0) + 1
     await chrome.storage.local.set({ [SCHEDULED_TASKS_KEY]: tasks })
+    // A daily/weekly/monthly alarm fires once; the next one is set here.
+    const schedule = TaskScheduler.scheduleOf(task)
+    if (schedule && schedule.kind !== 'interval') {
+        const info = TaskScheduler.alarmInfo(task, Date.now() + 60000)
+        if (info) await chrome.alarms.create(alarm.name, info)
+    }
     await executeScheduledTask(task)
 })
 
@@ -498,6 +508,11 @@ async function executeScheduledTask(task) {
 
 chrome.notifications.onClicked.addListener(async (notificationId) => {
     chrome.notifications.clear(notificationId)
+    // "Task finished" from the side panel: bring the panel up where the user is.
+    if (notificationId.startsWith('task_done_')) {
+        try { await openAgentForCurrentTab() } catch (_) { }
+        return
+    }
     if (!notificationId.startsWith(ALARM_PREFIX)) return
     const stored = await chrome.storage.session.get(PENDING_TASK_KEY)
     const pending = stored[PENDING_TASK_KEY]
@@ -659,7 +674,7 @@ async function handleAgentAction(action, tabId) {
     // With a tab group in place the run is confined to it: a tab outside the group is refused
     // rather than acted on. Without a group (tab groups switched off, or the API unavailable)
     // there is nothing to confine to.
-    if (agentTabGroupId && tabId && tab.groupId !== agentTabGroupId) {
+    if (tabId && await tabOutsideAgentGroup(tab)) {
         return fail(ERR.TAB_NOT_IN_GROUP, 'That tab is not in the agent tab group')
     }
 
@@ -677,6 +692,25 @@ async function handleAgentAction(action, tabId) {
         result.dialogs = seen.splice(0)
     }
     return result
+}
+
+/**
+ * Whether `tab` lies outside the agent's tab group, when there is one to speak of. A group id
+ * saved before a browser restart, or a group the user closed by hand, no longer exists; that
+ * stale state is cleared instead of refusing every action for the rest of the session.
+ */
+async function tabOutsideAgentGroup(tab) {
+    if (!agentTabGroupId || !tab) return false
+    if (tab.groupId === agentTabGroupId) return false
+    const settings = await getSettings()
+    if (settings.tabGroupEnabled === false) return false
+    try {
+        await chrome.tabGroups.get(agentTabGroupId)
+    } catch (_) {
+        await clearAgentTabGroupState().catch(() => { })
+        return false
+    }
+    return true
 }
 
 async function runAgentAction(action, tab) {
@@ -760,8 +794,34 @@ async function runAgentAction(action, tab) {
             await new Promise(r => setTimeout(r, Math.min(Number(action.duration) || 1000, 30000)))
             return { success: true }
 
-        case 'screenshot':
-            return { success: true, dataUrl: await takeScreenshot(tab.id) }
+        case 'screenshot': {
+            const dataUrl = await takeScreenshot(tab.id)
+            if (!action.save) return { success: true, dataUrl }
+            // Saved under the downloads folder. A download the extension starts itself is not
+            // gated: it is the agent's own picture of a page the user can see.
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+            const filename = `AgentAura/screenshot-${stamp}.jpg`
+            await chrome.downloads.download({ url: dataUrl, filename, saveAs: false, conflictAction: 'uniquify' })
+            return { success: true, dataUrl, saved: filename }
+        }
+
+        case 'close_tab': {
+            const targetId = Number(action.targetTabId) || tab.id
+            let target
+            try {
+                target = await chrome.tabs.get(targetId)
+            } catch (_) {
+                return fail(ERR.NO_TAB, `Tab ${targetId} does not exist`)
+            }
+            if (await tabOutsideAgentGroup(target)) {
+                return fail(ERR.TAB_NOT_IN_GROUP, 'That tab is not in the current agent tab group')
+            }
+            // Where the run goes next: another tab of the group, if there is one.
+            const group = await listGroupTabs(tab.id)
+            const remaining = (group.tabs || []).filter(t => t.id !== targetId)
+            await chrome.tabs.remove(targetId)
+            return { success: true, closedTabId: targetId, nextTabId: remaining.length ? remaining[0].id : null }
+        }
 
         case 'read_page':
         case 'get_page_text':

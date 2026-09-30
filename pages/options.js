@@ -138,7 +138,7 @@ function renderTasks(tasks) {
         <div class="task-item">
             <div class="task-info">
                 <div class="task-name">${escapeHtml(t.name)}</div>
-                <div class="task-schedule">${escapeHtml(I18n.t('sys.everyNMin', { n: toNumber(t.intervalMinutes) }))} · ${toNumber(t.runCount)} ${escapeHtml(I18n.t('options.runs'))} · ${t.enabled ? '✅ ' + escapeHtml(I18n.t('options.active')) : '⏸ ' + escapeHtml(I18n.t('options.paused'))}</div>
+                <div class="task-schedule">${escapeHtml(TaskScheduler.describeSchedule(t, I18n.getLang()))} · ${toNumber(t.runCount)} ${escapeHtml(I18n.t('options.runs'))} · ${t.enabled ? '✅ ' + escapeHtml(I18n.t('options.active')) : '⏸ ' + escapeHtml(I18n.t('options.paused'))}${Array.isArray(t.runs) && t.runs[0] ? ' · ' + escapeHtml(I18n.t('schedule.lastRunLine', { when: new Date(t.runs[0].finishedAt || t.runs[0].startedAt).toLocaleString(I18n.getLang() === 'zh' ? 'zh-CN' : undefined), status: I18n.t(`schedule.status.${t.runs[0].status}`), steps: toNumber(t.runs[0].steps) })) : ''}</div>
             </div>
             <button class="delete-btn" data-task-id="${escapeAttr(t.id)}" style="opacity:1">${escapeHtml(I18n.t('sys.delete'))}</button>
         </div>

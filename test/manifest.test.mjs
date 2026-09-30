@@ -130,7 +130,13 @@ test('keyboard shortcuts stay off the browser\'s own Ctrl+E and Ctrl+Shift+A', (
     }
 })
 
-test('the worker registered in the manifest is the one that imports i18n', () => {
-    assert.match(read(manifest.background.service_worker), /importScripts\('i18n\.js'\)/)
-    assert.ok(existsSync(new URL('js/i18n.js', root)))
+test('the worker registered in the manifest imports i18n and the scheduler, and both files exist', () => {
+    const worker = read(manifest.background.service_worker)
+    const m = /importScripts\(([^)]*)\)/.exec(worker)
+    assert.ok(m, 'the worker calls importScripts')
+    const imported = [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1])
+    assert.ok(imported.includes('i18n.js'), imported.join(', '))
+    assert.ok(imported.includes('agent/task-scheduler.js'), imported.join(', '))
+    // Paths are relative to the worker's own directory.
+    for (const file of imported) assert.ok(existsSync(new URL(`js/${file}`, root)), file)
 })

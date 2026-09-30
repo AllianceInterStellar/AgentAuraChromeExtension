@@ -74,6 +74,9 @@ test('list_tabs, new_tab and screenshot', () => {
         'tab 3 (active): A | https://a\ntab 4: B | https://b')
     assert.equal(sum({ type: 'new_tab' }, { success: true, tabId: 12 }), 'opened tab 12')
     assert.equal(sum({ type: 'screenshot' }, { success: true, dataUrl: 'data:image/jpeg;base64,AAA' }), 'screenshot attached to this message')
+    assert.equal(sum({ type: 'screenshot' }, { success: true, dataUrl: 'data:image/jpeg;base64,AAA', saved: 'AgentAura/screenshot-1.jpg' }), 'screenshot attached to this message; saved to AgentAura/screenshot-1.jpg')
+    assert.equal(sum({ type: 'close_tab' }, { success: true, closedTabId: 4, nextTabId: 3 }), 'closed tab 4, now on tab 3')
+    assert.equal(sum({ type: 'close_tab' }, { success: true, closedTabId: 4, nextTabId: null }), 'closed tab 4')
 })
 
 test('execute_js: primitives and objects come back as text, clipped', () => {

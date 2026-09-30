@@ -19,7 +19,7 @@ cd test && npm test              # the same thing
 | File | What it pins down |
 |---|---|
 | `one-agent-limit.test.mjs` | A 402 from `POST /claws` opens the website; every other failure keeps its error toast; the message exists in every language; no script calls a billing endpoint |
-| `blocked-site.test.mjs` | `isBlockedSite()`: sign-in hosts and paths, banks, `.gov`, browser-internal schemes; ordinary pages and unparseable strings are not blocked |
+| `blocked-site.test.mjs` | `isBlockedSite()`: sign-in hosts and paths, banks, `.gov`, browser-internal schemes; `isFinancialSite()`, `hostMatches()`, `isHttpUrl()`, `matchesPattern()`, `dialogAnswer()` |
 | `map-key.test.mjs` | `mapKey()`: the `{key, code, keyCode}` triple sent over CDP for every named key, letter, digit and function key |
 | `utils.test.mjs` | `escapeHtml` (all five characters), `sanitizeUrl` (only http(s)/mailto survive; `data:image` only when asked), `toNumber`, `clamp`, `cssToken` |
 | `api-client.test.mjs` | A 401 is replayed once with the refreshed token, then given up as `ApiError` 401; network failure → `NETWORK`, a stuck request → `TIMEOUT`; `getClaws` throws on 5xx; `deleteClaw` hits `/force` only with `{force: true}` |
@@ -27,10 +27,10 @@ cd test && npm test              # the same thing
 | `automation-engine.test.mjs` | `describeAction()` names the ref for `click_ref` and never reads "undefined", with or without I18n; unknown types come back as their name; `isKnownAction` |
 | `workflow-recorder.test.mjs` | `recordAction()` folds keystrokes into one step per field, keeps `redacted`, records nothing when off |
 | `i18n-parity.test.mjs` | en and zh have the same keys and the same `{placeholders}`; every key the HTML and the scripts ask for exists in en; every language in the picker can be selected |
-| `permission-manager.test.mjs` | `checkPermission()` per mode; `execute_js` and sensitive fields ask in every mode; "approve all" covers one run and never writes the mode; a run's mode override; plan steps; cancel and supersede |
-| `action-results.test.mjs` | `ActionResults.summarize()` for every reading action (page text, find, console, network, tabs, execute_js), clipping; `parseRefLabels()` |
-| `sensitive-field.test.mjs` | `isSensitiveField()`/`fieldLabel()` in the content script; the worker's injected functions carry the same test and honour `confirmedSensitive` |
-| `task-scheduler.test.mjs` | `TaskScheduler.add()`: interval, start URL (http(s) only), unattended flag, the alarm it creates |
+| `permission-manager.test.mjs` | `checkPermission()` per mode; `execute_js`, sensitive fields, downloads and changes on payment pages ask in every mode; the per-site allow list and `approveSite()`; "approve all" covers one run and never writes the mode; a run's mode override; plan steps; cancel and supersede |
+| `action-results.test.mjs` | `ActionResults.summarize()` for every reading action (page text, find, console, network with bodies, tabs, execute_js, saved screenshots, closed tabs), dialogs the page opened, clipping; `parseRefLabels()` |
+| `sensitive-field.test.mjs` | `isSensitiveField()`/`fieldLabel()`/`detectChallenges()` in the content script; the worker's injected functions carry the same test and honour `confirmedSensitive` |
+| `task-scheduler.test.mjs` | The schedule arithmetic (`normalizeSchedule`, `nextRunAt` for daily/weekly/monthly, `alarmInfo`), `add()` with its limits and flags, `update()`, `recordRun()` keeping ten runs, the twenty-task cap |
 | `manifest.test.mjs` | MV3, `minimum_chrome_version`, every permission is used and every permission-gated API is declared, no content scripts or web-accessible resources, shortcuts avoid `Ctrl+E`/`Ctrl+Shift+A` |
 
 `helpers/load.mjs` is the loader they share: `loadScripts(paths, { globals, chrome, prelude })`

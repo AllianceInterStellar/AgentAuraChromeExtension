@@ -59,11 +59,11 @@ const sidepanel = (() => {
         '```',
         '',
         'Actions (parameters in parentheses, ? = optional):',
-        '- Navigation: navigate(url) · new_tab(url) · select_tab(targetTabId) · list_tabs',
+        '- Navigation: navigate(url) · new_tab(url) · select_tab(targetTabId) · close_tab(targetTabId?) · list_tabs',
         '- Elements by [ref] from the element list: click_ref(ref, clickType?=left|right|double) · type_ref(ref, text, clear?=true) · hover_ref(ref)',
         '- Elements by CSS selector: click(selector) · type(selector, text) · form_input(selector, value | checked) · find(selector) → up to 20 matches',
         '- Keyboard and mouse: cdp_key(key, modifiers?) e.g. "Enter", "Tab", "a" · cdp_type(text) into the focused element · cdp_click(x, y, button?, clickCount?) · cdp_drag(startX, startY, endX, endY)',
-        '- Reading: read_page_content(filter?=interactive|all) → element list with [ref] ids · get_page_text → visible text · screenshot → image attached to your next turn (not sent automatically; ask when the element list is not enough) · read_console(pattern?, level?) · read_network(pattern?, includeBody?) · execute_js(code) → value of the expression (always asks the user)',
+        '- Reading: read_page_content(filter?=interactive|all) → element list with [ref] ids · get_page_text → visible text · screenshot(save?) → image attached to your next turn (not sent automatically; ask when the element list is not enough; save: true also writes it to the downloads folder) · read_console(pattern?, level?) · read_network(pattern?, includeBody?) · execute_js(code) → value of the expression (always asks the user)',
         '- Window: scroll(direction=up|down|left|right, amount?=300) · wait(duration ms, ≤30000) · zoom(level) · resize_window(width, height)',
         '',
         'After your actions run you get [Executed Actions] with each outcome, [Action Results] with what the reading actions returned, and the fresh [Page State].',
@@ -82,6 +82,16 @@ const sidepanel = (() => {
     let lastRefLabels = new Map()
     /** A permission mode the next run must use instead of the stored one (scheduled tasks). */
     let pendingRunModeOverride = null
+    /** `{ maxSteps, maxMinutes }` the next run must respect instead of the settings (scheduled tasks). */
+    let pendingRunLimits = null
+    /** This run's ceilings: the settings, or the scheduled task's own. */
+    let runMaxSteps = 30
+    let runMaxDurationMs = 10 * 60 * 1000
+    /** The scheduled task this run is for, so its outcome can be recorded and notified. */
+    let currentScheduledTask = null
+    /** The "/" palette: saved shortcuts filtered by what follows the slash. */
+    let paletteOpen = false
+    const SLASH_COMMANDS = new Set(['/vision-test', '/diag'])
     /** The old behaviour, as a setting: a screenshot on every turn whatever the element list says. */
     let screenshotEveryTurn = false
     /** Failed turns in a row. After MAX_CONSECUTIVE_FAILURES the run stops and asks the user. */
@@ -222,12 +232,23 @@ const sidepanel = (() => {
         $('#sp-input').addEventListener('compositionstart', () => { isComposing = true })
         $('#sp-input').addEventListener('compositionend', () => { isComposing = false })
         $('#sp-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && paletteOpen) {
+                e.preventDefault()
+                closeShortcutPalette()
+                return
+            }
             if (e.key === 'Enter' && !e.shiftKey && !isComposing && !e.isComposing) {
                 e.preventDefault()
+                // "/" and Enter: the first matching saved shortcut goes into the box, to be
+                // read and sent with a second Enter.
+                if (paletteOpen && pickFirstShortcut()) return
                 handleSend()
             }
         })
-        $('#sp-input').addEventListener('input', autoResizeInput)
+        $('#sp-input').addEventListener('input', () => {
+            autoResizeInput()
+            updateShortcutPalette()
+        })
 
         $('#sp-btn-new-chat').addEventListener('click', handleNewChat)
         $('#sp-btn-shortcuts').addEventListener('click', toggleShortcutsPanel)
@@ -244,6 +265,11 @@ const sidepanel = (() => {
         if (schedCloseBtn) schedCloseBtn.addEventListener('click', toggleSchedulePanel)
         const schedAddBtn = $('#sp-btn-add-schedule')
         if (schedAddBtn) schedAddBtn.addEventListener('click', handleAddScheduledTask)
+        const schedCancelBtn = $('#sp-btn-cancel-edit')
+        if (schedCancelBtn) schedCancelBtn.addEventListener('click', endEditingTask)
+        const schedKind = $('#sp-schedule-kind')
+        if (schedKind) schedKind.addEventListener('change', updateScheduleForm)
+        updateScheduleForm()
 
         $$('.sp-perm-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -445,6 +471,9 @@ const sidepanel = (() => {
         automationEngine.reset()
         permissionManager.beginRun({ modeOverride: pendingRunModeOverride })
         pendingRunModeOverride = null
+        runMaxSteps = (pendingRunLimits && pendingRunLimits.maxSteps) || MAX_AGENT_STEPS
+        runMaxDurationMs = pendingRunLimits && pendingRunLimits.maxMinutes ? pendingRunLimits.maxMinutes * 60 * 1000 : MAX_LOOP_DURATION_MS
+        pendingRunLimits = null
         consecutiveFailures = 0
         agentStepCount = 0
         llmRoundCount = 0
@@ -453,7 +482,7 @@ const sidepanel = (() => {
         isGenerating = true
         agentLoopRunning = true
         updateGeneratingUI()
-        updateStepCounter(0, MAX_AGENT_STEPS)
+        updateStepCounter(0, runMaxSteps)
         return currentRunId
     }
 
@@ -463,9 +492,9 @@ const sidepanel = (() => {
 
     /** Why the loop must stop, or null if it may go on. */
     function loopLimitReason() {
-        if (agentStepCount >= MAX_AGENT_STEPS) return I18n.t('sys.limitSteps', { max: MAX_AGENT_STEPS })
-        if (llmRoundCount >= MAX_AGENT_STEPS * MAX_LLM_ROUNDS_FACTOR) return I18n.t('sys.limitRounds', { max: MAX_AGENT_STEPS * MAX_LLM_ROUNDS_FACTOR })
-        if (Date.now() - loopStartedAt > MAX_LOOP_DURATION_MS) return I18n.t('sys.limitTime', { minutes: Math.round(MAX_LOOP_DURATION_MS / 60000) })
+        if (agentStepCount >= runMaxSteps) return I18n.t('sys.limitSteps', { max: runMaxSteps })
+        if (llmRoundCount >= runMaxSteps * MAX_LLM_ROUNDS_FACTOR) return I18n.t('sys.limitRounds', { max: runMaxSteps * MAX_LLM_ROUNDS_FACTOR })
+        if (Date.now() - loopStartedAt > runMaxDurationMs) return I18n.t('sys.limitTime', { minutes: Math.round(runMaxDurationMs / 60000) })
         return null
     }
 
@@ -646,6 +675,31 @@ const sidepanel = (() => {
         hideAgentBanner()
         settleIndicator(groupStatus)
         stopMonitoring()
+        if (currentScheduledTask) {
+            const task = currentScheduledTask
+            currentScheduledTask = null
+            recordScheduledRun(task, groupStatus)
+        }
+    }
+
+    /**
+     * What a scheduled run did, for the task's run log and, when the task asks for it, a
+     * notification: the user was very possibly not watching.
+     */
+    function recordScheduledRun(task, status) {
+        const lastReply = [...messages].reverse().find(m => m.role === 'assistant' && m.content && !m.isError)
+        const summary = lastReply ? String(lastReply.content).replace(/```[\s\S]*?```/g, '').trim().substring(0, 200) : ''
+        const run = { startedAt: loopStartedAt, finishedAt: Date.now(), status, steps: agentStepCount, summary }
+        taskScheduler.recordRun(task.id, run).catch(() => { })
+        if (task.notify === false) return
+        try {
+            chrome.notifications.create(`task_done_${task.id}`, {
+                type: 'basic',
+                iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+                title: I18n.t('sys.taskDoneTitle', { name: task.name || '' }),
+                message: summary || I18n.t('sys.taskDoneBody', { status: I18n.t(`schedule.status.${status}`), steps: agentStepCount })
+            })
+        } catch (_) { }
     }
 
     /**
@@ -1111,7 +1165,7 @@ const sidepanel = (() => {
             if (loopLimitReason()) break
 
             agentStepCount++
-            updateStepCounter(agentStepCount, MAX_AGENT_STEPS)
+            updateStepCounter(agentStepCount, runMaxSteps)
 
             const result = await executeAgentAction(runId, action)
             executed.push({ action, result })
@@ -1124,6 +1178,7 @@ const sidepanel = (() => {
             // The actions that move the run to another tab.
             if ((action.type === 'new_tab' || action.type === 'tabs_create') && result && result.tabId) automationEngine.activeTabId = result.tabId
             if (action.type === 'select_tab' && action.targetTabId) automationEngine.activeTabId = action.targetTabId
+            if (action.type === 'close_tab' && result && result.closedTabId === automationEngine.activeTabId) automationEngine.activeTabId = result.nextTabId || null
 
             if (i < actions.length - 1 && DOM_CHANGING_ACTIONS.has(action.type)) {
                 await new Promise(r => setTimeout(r, 300))
@@ -1837,18 +1892,60 @@ const sidepanel = (() => {
             </button>
         `).join('')
 
+        if (paletteOpen) {
+            const first = list.querySelector('.sp-shortcut-item')
+            if (first) first.classList.add('active')
+        }
+
         list.querySelectorAll('.sp-shortcut-item').forEach(el => {
             el.addEventListener('click', () => {
                 const shortcut = shortcuts.find(s => s.id === el.dataset.id)
-                if (shortcut) {
-                    $('#sp-input').value = shortcut.text
-                    autoResizeInput()
-                    shortcutsManager.incrementUse(shortcut.id).catch(() => { })
-                    toggleShortcutsPanel()
-                    $('#sp-input').focus()
-                }
+                if (shortcut) applyShortcut(shortcut)
             })
         })
+    }
+
+    /** The shortcut's text goes into the box, not straight out: the user reads it, then sends. */
+    function applyShortcut(shortcut) {
+        $('#sp-input').value = shortcut.text
+        autoResizeInput()
+        shortcutsManager.incrementUse(shortcut.id).catch(() => { })
+        if (paletteOpen) closeShortcutPalette()
+        else $('#sp-shortcuts-panel').classList.add('hidden')
+        $('#sp-input').focus()
+    }
+
+    /**
+     * "/" at the start of an otherwise empty box opens the saved shortcuts, filtered by what
+     * follows the slash, the way Claude in Chrome does. The two developer commands are left
+     * alone. Anything else typed closes the palette again.
+     */
+    function updateShortcutPalette() {
+        const input = $('#sp-input')
+        const panel = $('#sp-shortcuts-panel')
+        const m = /^\/(\S*)$/.exec(input.value)
+        if (m && !SLASH_COMMANDS.has(input.value.trim().toLowerCase()) && shortcutsManager.getAll().length) {
+            $('#sp-shortcuts-search').value = m[1]
+            panel.classList.remove('hidden')
+            paletteOpen = true
+            renderShortcutsList()
+        } else if (paletteOpen) {
+            closeShortcutPalette()
+        }
+    }
+
+    function closeShortcutPalette() {
+        paletteOpen = false
+        $('#sp-shortcuts-panel').classList.add('hidden')
+        $('#sp-shortcuts-search').value = ''
+    }
+
+    function pickFirstShortcut() {
+        const query = $('#sp-shortcuts-search').value
+        const [first] = query ? shortcutsManager.search(query) : shortcutsManager.getAll()
+        if (!first) return false
+        applyShortcut(first)
+        return true
     }
 
     async function handleAddShortcut() {
@@ -1879,6 +1976,8 @@ const sidepanel = (() => {
         }
     }
 
+    let editingTaskId = null
+
     function renderScheduledTasks() {
         const list = $('#sp-schedule-list')
         if (!list) return
@@ -1890,19 +1989,28 @@ const sidepanel = (() => {
         }
 
         const locale = I18n.getLang() === 'zh' ? 'zh-CN' : undefined
+        const lastRunLine = (t) => {
+            const run = Array.isArray(t.runs) && t.runs[0]
+            if (!run) return t.lastRun ? I18n.t('sys.lastRun') + new Date(t.lastRun).toLocaleString(locale) : ''
+            const status = I18n.t(`schedule.status.${run.status}`) === `schedule.status.${run.status}` ? String(run.status) : I18n.t(`schedule.status.${run.status}`)
+            return I18n.t('schedule.lastRunLine', { when: new Date(run.finishedAt || run.startedAt).toLocaleString(locale), status, steps: run.steps || 0 })
+                + (run.summary ? ` — ${run.summary.substring(0, 80)}` : '')
+        }
         list.innerHTML = tasks.map(t => `
-            <div class="sp-shortcut-item sp-schedule-item" data-id="${escapeHtml(t.id)}">
+            <div class="sp-shortcut-item sp-schedule-item${t.id === editingTaskId ? ' editing' : ''}" data-id="${escapeHtml(t.id)}">
                 <div class="sp-schedule-row">
                     <div class="sp-shortcut-name">${escapeHtml(t.name)}</div>
                     <div class="sp-schedule-actions">
                         <button type="button" class="sp-schedule-toggle ${t.enabled ? 'enabled' : ''}" data-toggle="${escapeHtml(t.id)}" aria-pressed="${t.enabled ? 'true' : 'false'}" title="${escapeHtml(t.enabled ? I18n.t('sys.enabled') : I18n.t('sys.disabled'))}" aria-label="${escapeHtml(t.enabled ? I18n.t('sys.enabled') : I18n.t('sys.disabled'))}">
                             ${t.enabled ? '✓' : '✗'}
                         </button>
+                        <button type="button" class="sp-schedule-edit" data-edit="${escapeHtml(t.id)}" title="${escapeHtml(I18n.t('schedule.edit'))}" aria-label="${escapeHtml(I18n.t('schedule.edit'))}">✎</button>
                         <button type="button" class="sp-schedule-delete" data-delete="${escapeHtml(t.id)}" title="${escapeHtml(I18n.t('sys.delete'))}" aria-label="${escapeHtml(I18n.t('sys.delete'))}">✕</button>
                     </div>
                 </div>
                 <div class="sp-shortcut-text">${escapeHtml((t.prompt || '').substring(0, 60))}</div>
-                <div class="sp-schedule-meta">${escapeHtml(I18n.t('sys.everyNMin', { n: t.intervalMinutes }))} · ${escapeHtml(I18n.t('sys.ranCount', { count: t.runCount || 0 }))}${t.lastRun ? ' · ' + escapeHtml(I18n.t('sys.lastRun')) + escapeHtml(new Date(t.lastRun).toLocaleString(locale)) : ''}${t.url ? ' · ' + escapeHtml(I18n.t('schedule.opens', { url: String(t.url).substring(0, 60) })) : ''}${t.allowUnattended ? ' · ' + escapeHtml(I18n.t('schedule.unattendedBadge')) : ''}</div>
+                <div class="sp-schedule-meta">${escapeHtml(TaskScheduler.describeSchedule(t, I18n.getLang()))} · ${escapeHtml(I18n.t('sys.ranCount', { count: t.runCount || 0 }))}${t.url ? ' · ' + escapeHtml(I18n.t('schedule.opens', { url: String(t.url).substring(0, 60) })) : ''}${t.allowUnattended ? ' · ' + escapeHtml(I18n.t('schedule.unattendedBadge')) : ''}${t.maxSteps ? ' · ' + escapeHtml(I18n.t('schedule.maxStepsBadge', { n: t.maxSteps })) : ''}</div>
+                ${lastRunLine(t) ? `<div class="sp-schedule-meta sp-schedule-runs">${escapeHtml(lastRunLine(t))}</div>` : ''}
             </div>
         `).join('')
 
@@ -1914,54 +2022,142 @@ const sidepanel = (() => {
             })
         })
 
+        list.querySelectorAll('[data-edit]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation()
+                beginEditingTask(btn.dataset.edit)
+            })
+        })
+
         list.querySelectorAll('[data-delete]').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation()
                 await taskScheduler.remove(btn.dataset.delete)
+                if (editingTaskId === btn.dataset.delete) endEditingTask()
                 renderScheduledTasks()
             })
         })
     }
 
-    async function handleAddScheduledTask() {
-        const promptInput = $('#sp-schedule-prompt')
-        const intervalInput = $('#sp-schedule-interval')
-        if (!promptInput || !intervalInput) return
+    /** The form shows the fields the chosen cadence needs. */
+    function updateScheduleForm() {
+        const kind = $('#sp-schedule-kind') ? $('#sp-schedule-kind').value : 'interval'
+        const show = (id, on) => { const el = $(id); if (el) el.classList.toggle('hidden', !on) }
+        show('#sp-schedule-row-interval', kind === 'interval')
+        show('#sp-schedule-row-time', kind !== 'interval')
+        show('#sp-schedule-row-weekday', kind === 'weekly')
+        show('#sp-schedule-row-day', kind === 'monthly')
+    }
 
-        const urlInput = $('#sp-schedule-url')
-        const unattendedInput = $('#sp-schedule-unattended')
-        const prompt = promptInput.value.trim()
-        const interval = TaskScheduler.normalizeInterval(intervalInput.value)
-        const url = urlInput ? urlInput.value.trim() : ''
-
+    /** What the form describes, or null (with a message shown) when it does not make a task. */
+    function readScheduleForm() {
+        const value = (id) => { const el = $(id); return el ? String(el.value).trim() : '' }
+        const checked = (id) => { const el = $(id); return !!(el && el.checked) }
+        const prompt = value('#sp-schedule-prompt')
         if (!prompt) {
             addSystemMessage(I18n.t('sys.enterTaskPrompt'))
-            return
+            return null
         }
-        if (!interval) {
-            addSystemMessage(I18n.t('sys.invalidInterval'))
-            return
+        const kind = value('#sp-schedule-kind') || 'interval'
+        const schedule = TaskScheduler.normalizeSchedule({
+            kind,
+            minutes: value('#sp-schedule-interval'),
+            time: value('#sp-schedule-time'),
+            weekday: value('#sp-schedule-weekday'),
+            day: value('#sp-schedule-day')
+        })
+        if (!schedule) {
+            addSystemMessage(kind === 'interval' ? I18n.t('sys.invalidInterval', { min: TaskScheduler.MIN_INTERVAL_MINUTES }) : I18n.t('sys.invalidTime'))
+            return null
         }
+        const url = value('#sp-schedule-url')
         if (url && TaskScheduler.normalizeUrl(url) === undefined) {
             addSystemMessage(I18n.t('sys.invalidTaskUrl'))
-            return
+            return null
         }
-
-        try {
-            await taskScheduler.add(prompt, interval, {
+        return {
+            prompt,
+            schedule,
+            options: {
                 url,
-                allowUnattended: !!(unattendedInput && unattendedInput.checked)
-            })
+                allowUnattended: checked('#sp-schedule-unattended'),
+                notify: checked('#sp-schedule-notify'),
+                maxSteps: value('#sp-schedule-max-steps') || null
+            }
+        }
+    }
+
+    function resetScheduleForm() {
+        const set = (id, v) => { const el = $(id); if (el) el.value = v }
+        const check = (id, v) => { const el = $(id); if (el) el.checked = v }
+        set('#sp-schedule-prompt', '')
+        set('#sp-schedule-kind', 'interval')
+        set('#sp-schedule-interval', '60')
+        set('#sp-schedule-time', '09:00')
+        set('#sp-schedule-weekday', '1')
+        set('#sp-schedule-day', '1')
+        set('#sp-schedule-url', '')
+        set('#sp-schedule-max-steps', '')
+        check('#sp-schedule-unattended', false)
+        check('#sp-schedule-notify', true)
+        updateScheduleForm()
+    }
+
+    function beginEditingTask(id) {
+        const task = taskScheduler.get(id)
+        if (!task) return
+        editingTaskId = id
+        const schedule = TaskScheduler.scheduleOf(task) || { kind: 'interval', minutes: 60 }
+        const set = (sel, v) => { const el = $(sel); if (el) el.value = v }
+        const check = (sel, v) => { const el = $(sel); if (el) el.checked = v }
+        set('#sp-schedule-prompt', task.prompt || '')
+        set('#sp-schedule-kind', schedule.kind)
+        set('#sp-schedule-interval', schedule.kind === 'interval' ? String(schedule.minutes) : '60')
+        set('#sp-schedule-time', schedule.time || '09:00')
+        set('#sp-schedule-weekday', schedule.weekday !== undefined ? String(schedule.weekday) : '1')
+        set('#sp-schedule-day', schedule.day !== undefined ? String(schedule.day) : '1')
+        set('#sp-schedule-url', task.url || '')
+        set('#sp-schedule-max-steps', task.maxSteps ? String(task.maxSteps) : '')
+        check('#sp-schedule-unattended', task.allowUnattended === true)
+        check('#sp-schedule-notify', task.notify !== false)
+        updateScheduleForm()
+        const addLabel = $('#sp-btn-add-schedule span')
+        if (addLabel) addLabel.textContent = I18n.t('schedule.save')
+        const cancel = $('#sp-btn-cancel-edit')
+        if (cancel) cancel.classList.remove('hidden')
+        renderScheduledTasks()
+        $('#sp-schedule-prompt').focus()
+    }
+
+    function endEditingTask() {
+        editingTaskId = null
+        resetScheduleForm()
+        const addLabel = $('#sp-btn-add-schedule span')
+        if (addLabel) addLabel.textContent = I18n.t('schedule.add')
+        const cancel = $('#sp-btn-cancel-edit')
+        if (cancel) cancel.classList.add('hidden')
+        renderScheduledTasks()
+    }
+
+    /** "Add Scheduled Task", or "Save Changes" while a task is being edited. */
+    async function handleAddScheduledTask() {
+        const form = readScheduleForm()
+        if (!form) return
+        try {
+            if (editingTaskId) {
+                await taskScheduler.update(editingTaskId, { prompt: form.prompt, schedule: form.schedule, ...form.options })
+                addSystemMessage(I18n.t('sys.taskUpdated'))
+                endEditingTask()
+            } else {
+                const task = await taskScheduler.add(form.prompt, form.schedule, form.options)
+                addSystemMessage(I18n.t('sys.taskAddedSchedule', { schedule: TaskScheduler.describeSchedule(task, I18n.getLang()) }))
+                resetScheduleForm()
+            }
         } catch (e) {
             addSystemMessage(I18n.t('sys.taskAddFailed', { msg: e.message }))
             return
         }
-        promptInput.value = ''
-        intervalInput.value = '60'
-        if (urlInput) urlInput.value = ''
-        if (unattendedInput) unattendedInput.checked = false
         renderScheduledTasks()
-        addSystemMessage(I18n.t('sys.taskAdded', { interval: interval }))
     }
 
     async function handleScheduledTaskExec(task) {
@@ -1993,8 +2189,13 @@ const sidepanel = (() => {
             pendingRunModeOverride = 'ask'
             addSystemMessage(I18n.t('sys.taskAskMode', { name: task.name }))
         }
+        // The task's own ceilings, and the record of what it did.
+        pendingRunLimits = { maxSteps: task.maxSteps || null, maxMinutes: task.maxMinutes || null }
+        currentScheduledTask = task
         $('#sp-input').value = task.prompt
         await handleSend()
+        // handleSend returned without starting a run (no text, busy): nothing to record.
+        if (!agentLoopRunning && currentScheduledTask === task) currentScheduledTask = null
     }
 
     // ---- approvals --------------------------------------------------------------------------

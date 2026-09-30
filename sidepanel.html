@@ -260,18 +260,55 @@
                 <textarea id="sp-schedule-prompt" class="sp-input" data-i18n-placeholder="schedule.prompt"
                     placeholder="Enter scheduled task prompt..." rows="2"></textarea>
                 <div class="sp-schedule-interval-row">
+                    <label for="sp-schedule-kind" data-i18n="schedule.kind">Repeat:</label>
+                    <select id="sp-schedule-kind" class="sp-schedule-select">
+                        <option value="interval" data-i18n="schedule.kind.interval">Every N minutes</option>
+                        <option value="daily" data-i18n="schedule.kind.daily">Daily</option>
+                        <option value="weekly" data-i18n="schedule.kind.weekly">Weekly</option>
+                        <option value="monthly" data-i18n="schedule.kind.monthly">Monthly</option>
+                    </select>
+                </div>
+                <div class="sp-schedule-interval-row" id="sp-schedule-row-interval">
                     <label for="sp-schedule-interval" data-i18n="schedule.interval">Interval (min):</label>
                     <input type="number" id="sp-schedule-interval" class="sp-schedule-interval-input" value="60"
-                        min="1">
+                        min="15">
+                </div>
+                <div class="sp-schedule-interval-row hidden" id="sp-schedule-row-time">
+                    <label for="sp-schedule-time" data-i18n="schedule.time">Time:</label>
+                    <input type="time" id="sp-schedule-time" class="sp-schedule-interval-input" value="09:00">
+                </div>
+                <div class="sp-schedule-interval-row hidden" id="sp-schedule-row-weekday">
+                    <label for="sp-schedule-weekday" data-i18n="schedule.weekday">Weekday:</label>
+                    <select id="sp-schedule-weekday" class="sp-schedule-select">
+                        <option value="1" data-i18n="weekday.1">Monday</option>
+                        <option value="2" data-i18n="weekday.2">Tuesday</option>
+                        <option value="3" data-i18n="weekday.3">Wednesday</option>
+                        <option value="4" data-i18n="weekday.4">Thursday</option>
+                        <option value="5" data-i18n="weekday.5">Friday</option>
+                        <option value="6" data-i18n="weekday.6">Saturday</option>
+                        <option value="0" data-i18n="weekday.0">Sunday</option>
+                    </select>
+                </div>
+                <div class="sp-schedule-interval-row hidden" id="sp-schedule-row-day">
+                    <label for="sp-schedule-day" data-i18n="schedule.dayOfMonth">Day of month:</label>
+                    <input type="number" id="sp-schedule-day" class="sp-schedule-interval-input" value="1" min="1" max="31">
                 </div>
                 <div class="sp-schedule-interval-row">
                     <label for="sp-schedule-url" data-i18n="schedule.url">Start URL (optional):</label>
                     <input type="url" id="sp-schedule-url" class="sp-input sp-schedule-url-input"
                         placeholder="https://" inputmode="url" autocomplete="off">
                 </div>
+                <div class="sp-schedule-interval-row">
+                    <label for="sp-schedule-max-steps" data-i18n="schedule.maxSteps">Max steps (optional):</label>
+                    <input type="number" id="sp-schedule-max-steps" class="sp-schedule-interval-input" min="1" max="500" placeholder="50">
+                </div>
                 <label class="sp-schedule-check">
                     <input type="checkbox" id="sp-schedule-unattended">
                     <span data-i18n="schedule.unattended">Run unattended (use the current permission mode instead of asking before every action)</span>
+                </label>
+                <label class="sp-schedule-check">
+                    <input type="checkbox" id="sp-schedule-notify" checked>
+                    <span data-i18n="schedule.notify">Notify me when a run finishes</span>
                 </label>
             </div>
             <div class="sp-shortcuts-list" id="sp-schedule-list"></div>
@@ -283,6 +320,7 @@
                 </svg>
                 <span data-i18n="schedule.add">Add Scheduled Task</span>
             </button>
+            <button class="sp-btn sp-btn-secondary sp-btn-full hidden" id="sp-btn-cancel-edit" data-i18n="schedule.cancelEdit">Cancel editing</button>
         </div>
 
         <!-- Input Area -->

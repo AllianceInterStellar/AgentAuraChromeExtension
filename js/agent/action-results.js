@@ -114,8 +114,15 @@ const ActionResults = {
                     .join('\n')
             }
 
-            case 'screenshot':
-                return result.dataUrl ? 'screenshot attached to this message' : null
+            case 'screenshot': {
+                const parts = []
+                if (result.dataUrl) parts.push('screenshot attached to this message')
+                if (result.saved) parts.push(`saved to ${result.saved}`)
+                return parts.length ? parts.join('; ') : null
+            }
+
+            case 'close_tab':
+                return `closed tab ${result.closedTabId}${result.nextTabId ? `, now on tab ${result.nextTabId}` : ''}`
 
             case 'new_tab':
             case 'tabs_create':

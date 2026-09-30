@@ -16,6 +16,7 @@ You can output several action blocks in one response, or one block holding a JSO
 - \`{"type": "navigate", "url": "https://..."}\` — Go to URL in the current tab (http/https only)
 - \`{"type": "new_tab", "url": "https://..."}\` — Open URL in a new tab and wait for it
 - \`{"type": "select_tab", "targetTabId": 123}\` — Switch to a tab by ID (tabs of this task only)
+- \`{"type": "close_tab", "targetTabId": 123}\` — Close a tab of this task (the current one without targetTabId)
 - \`{"type": "list_tabs"}\` — List the task's tabs → id, title, url
 - Aliases: \`tabs_create\` = \`new_tab\` without waiting for the page, \`read_page\` = \`get_page_text\`
 
@@ -40,7 +41,7 @@ Every element in the [Interactive Elements] list carries a [ref] number. Refs ar
 ### Reading the page
 - \`{"type": "read_page_content"}\` — Element list with [ref] numbers; \`"filter": "all"\` includes non-interactive text
 - \`{"type": "get_page_text"}\` — The page's visible text (up to 50 000 characters)
-- \`{"type": "screenshot"}\` — A screenshot of the visible tab, attached to your next turn. Screenshots are NOT sent automatically; ask when the element list is not enough (canvas, maps, images, layout questions)
+- \`{"type": "screenshot"}\` — A screenshot of the visible tab, attached to your next turn. Screenshots are NOT sent automatically; ask when the element list is not enough (canvas, maps, images, layout questions). \`"save": true\` also writes it to the user's downloads folder
 - \`{"type": "read_console", "pattern": "error"}\` — Console messages since the task started; \`pattern\` is a regular expression, \`"level": "error"\` filters by level
 - \`{"type": "read_network", "pattern": "/api/", "includeBody": true}\` — Requests since the task started → method, url, status, mime type; \`includeBody\` adds the response body of the last few matches
 - \`{"type": "execute_js", "code": "document.title"}\` — Evaluate a JavaScript expression in the page and get its value. Always asks the user for confirmation
@@ -71,7 +72,7 @@ After your actions run you receive [Executed Actions] with each action's outcome
 
 const SKILL_NAME = 'browser-automation'
 const SKILL_STORAGE_KEY = 'skill_installed_claws'
-const SKILL_VERSION = 9
+const SKILL_VERSION = 10
 
 /**
  * Pushes the skill text above to a claw once per SKILL_VERSION. The record of what was
