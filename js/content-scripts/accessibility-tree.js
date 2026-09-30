@@ -33,8 +33,35 @@
     // thread for seconds. The result says when it was cut short.
     const MAX_VISITED_NODES = 5000
     const MAX_TREE_ENTRIES = 1500
-    const SKIP_TAGS = new Set(['script', 'style', 'noscript', 'svg', 'path', 'meta', 'link', 'br', 'hr', 'template', 'iframe'])
+    const SKIP_TAGS = new Set(['script', 'style', 'noscript', 'svg', 'path', 'meta', 'link', 'br', 'hr', 'template'])
 
+    /**
+     * The document inside a frame, when the page is allowed to see it (same origin). A
+     * cross-origin frame throws or hands back null; the model is told the frame is there.
+     */
+    function frameDocument(iframe) {
+        try {
+            const doc = iframe.contentDocument
+            return doc && doc.body ? doc : null
+        } catch (_) {
+            return null
+        }
+    }
+
+    function frameHost(iframe) {
+        try {
+            return new URL(iframe.src, document.baseURI).host
+        } catch (_) {
+            return ''
+        }
+    }
+
+    /**
+     * Walks the page, into open shadow roots and same-origin frames as well: many sites keep
+     * their sign-in form, payment fields or whole widgets there, and the model saw none of it.
+     * `offset` is the frame's position in the top page, so an element's bbox is where a
+     * cdp_click has to land.
+     */
     function buildAccessibilityTree(root, maxDepth = 8, filter = 'all') {
         resetElementMap()
         const tree = []
@@ -42,7 +69,7 @@
         let visited = 0
         let truncated = false
 
-        function walk(node, depth) {
+        function walk(node, depth, offset = { x: 0, y: 0 }) {
             if (truncated) return
             if (depth > maxDepth) return
             if (!node || node.nodeType !== Node.ELEMENT_NODE) return
@@ -57,18 +84,44 @@
             const isVisible = isVisibleElement(node)
             if (!isVisible) return
 
+            if (tag === 'iframe' || tag === 'frame') {
+                const doc = frameDocument(node)
+                const frameRect = node.getBoundingClientRect()
+                if (doc) {
+                    walk(doc.body, depth + 1, { x: offset.x + frameRect.x, y: offset.y + frameRect.y })
+                } else {
+                    // Not readable from here. Named, so the model knows a piece of the page is
+                    // missing rather than believing the page is empty there.
+                    tree.push({
+                        tag: 'iframe',
+                        role: 'frame',
+                        label: `cross-origin frame${frameHost(node) ? ': ' + frameHost(node) : ''}`,
+                        interactive: false,
+                        crossOrigin: true,
+                        bbox: { x: Math.round(frameRect.x + offset.x), y: Math.round(frameRect.y + offset.y), w: Math.round(frameRect.width), h: Math.round(frameRect.height) }
+                    })
+                }
+                return
+            }
+
             const role = node.getAttribute('role') || getImplicitRole(tag)
             const isInteractive = isInteractiveElement(node)
 
             for (const child of node.children) {
-                walk(child, depth + 1)
+                walk(child, depth + 1, offset)
+            }
+            if (node.shadowRoot) {
+                for (const child of node.shadowRoot.children) {
+                    walk(child, depth + 1, offset)
+                }
             }
 
             if (interactiveOnly && !isInteractive) return
 
             const label = getAccessibleName(node)
             const refId = isInteractive ? assignRefId(node) : undefined
-            const rect = isInteractive ? node.getBoundingClientRect() : null
+            const own = isInteractive ? node.getBoundingClientRect() : null
+            const rect = own ? { x: own.x + offset.x, y: own.y + offset.y, width: own.width, height: own.height, top: own.top + offset.y, bottom: own.bottom + offset.y, left: own.left + offset.x, right: own.right + offset.x } : null
             const inViewport = rect ? (rect.top < window.innerHeight && rect.bottom > 0 && rect.left < window.innerWidth && rect.right > 0) : true
 
             const entry = {
@@ -121,6 +174,7 @@
             if (node.label) line += ` "${node.label}"`
             if (node.value) line += ` value="${node.value}"`
             if (node.sensitive) line += ' sensitive'
+            if (node.crossOrigin) line += ' cross-origin'
             if (node.href) line += ` → ${node.href.substring(0, 80)}`
             if (node.bbox) line += ` @(${node.bbox.x},${node.bbox.y})`
             if (length + line.length + 1 > maxLength) {
@@ -198,7 +252,7 @@
 
         const ariaLabelledBy = el.getAttribute('aria-labelledby')
         if (ariaLabelledBy) {
-            const refEl = document.getElementById(ariaLabelledBy)
+            const refEl = (el.ownerDocument || document).getElementById(ariaLabelledBy)
             if (refEl) return refEl.textContent?.trim()
         }
 
@@ -246,7 +300,9 @@
     }
 
     function isVisibleElement(el) {
-        const style = window.getComputedStyle(el)
+        // An element inside a same-origin frame is styled by that frame's window.
+        const view = (el.ownerDocument && el.ownerDocument.defaultView) || window
+        const style = view.getComputedStyle(el)
         if (style.display === 'none' || style.visibility === 'hidden') return false
         if (el.offsetWidth === 0 && el.offsetHeight === 0) return false
         return true
@@ -339,6 +395,37 @@
                 el.dispatchEvent(new Event('input', { bubbles: true }))
                 el.dispatchEvent(new Event('change', { bubbles: true }))
                 sendResponse({ success: true })
+            }
+        } else if (message.type === 'SET_FILES_BY_REF') {
+            // The user chose the files on the approval card; they arrive base64-encoded. A
+            // DataTransfer is the only way a script may put files into an <input type=file>.
+            const el = message.refId !== undefined && message.refId !== null
+                ? getElementByRefId(message.refId)
+                : (message.selector ? document.querySelector(message.selector) : null)
+            if (!el) {
+                sendResponse({ success: false, code: 'ELEMENT_NOT_FOUND', error: `Element [${message.refId ?? message.selector}] not found` })
+            } else if (!(el.tagName === 'INPUT' && String(el.type || '').toLowerCase() === 'file')) {
+                sendResponse({ success: false, code: 'NOT_FILE_INPUT', error: 'The target is not an <input type="file">' })
+            } else {
+                try {
+                    const transfer = new DataTransfer()
+                    for (const f of (Array.isArray(message.files) ? message.files : [])) {
+                        const binary = atob(String(f.data || ''))
+                        const bytes = new Uint8Array(binary.length)
+                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+                        transfer.items.add(new File([bytes], String(f.name || 'file'), { type: String(f.type || '') }))
+                    }
+                    if (!el.multiple && transfer.files.length > 1) {
+                        sendResponse({ success: false, code: 'UPLOAD_FAILED', error: 'This field takes one file' })
+                        return
+                    }
+                    el.files = transfer.files
+                    el.dispatchEvent(new Event('input', { bubbles: true }))
+                    el.dispatchEvent(new Event('change', { bubbles: true }))
+                    sendResponse({ success: true, count: el.files.length, names: Array.from(el.files).map(f => f.name) })
+                } catch (e) {
+                    sendResponse({ success: false, code: 'UPLOAD_FAILED', error: e.message })
+                }
             }
         } else if (message.type === 'HOVER_ELEMENT_BY_REF') {
             const el = getElementByRefId(message.refId)

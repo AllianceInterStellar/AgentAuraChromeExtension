@@ -124,6 +124,11 @@ const ActionResults = {
             case 'close_tab':
                 return `closed tab ${result.closedTabId}${result.nextTabId ? `, now on tab ${result.nextTabId}` : ''}`
 
+            case 'upload_file': {
+                const names = Array.isArray(result.names) ? result.names : []
+                return `${result.count ?? names.length} file(s) attached${names.length ? ': ' + clip(names.join(', '), limits.line) : ''}`
+            }
+
             case 'new_tab':
             case 'tabs_create':
                 return result.tabId !== undefined ? `opened tab ${result.tabId}` : null

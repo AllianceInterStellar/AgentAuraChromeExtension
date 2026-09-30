@@ -51,7 +51,7 @@ class PermissionManager {
     static SITE_ALLOW_KEY = 'agent_site_allow'
 
     /** Actions that ask in every mode, "approve all" included. `download` is the worker's, not the model's. */
-    static ALWAYS_CONFIRM = new Set(['execute_js', 'download'])
+    static ALWAYS_CONFIRM = new Set(['execute_js', 'download', 'upload_file'])
 
     /** Actions that change something on the page; the ones that ask on a payment or finance page. */
     static MUTATING = new Set(['click', 'click_ref', 'type', 'type_ref', 'form_input', 'cdp_click', 'cdp_type', 'cdp_key', 'cdp_drag', 'execute_js'])

@@ -817,6 +817,25 @@ h4.sp-md-heading {
     margin-bottom: 8px;
 }
 
+.sp-approval-upload {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.sp-approval-upload input[type="file"] {
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+.sp-approval-file-info {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
 .sp-approval-buttons,
 .sp-plan-buttons {
     display: flex;

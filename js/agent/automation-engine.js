@@ -13,7 +13,7 @@ class AutomationEngine {
         'click', 'type', 'navigate', 'scroll', 'form_input', 'wait', 'screenshot', 'read_page', 'find',
         'tabs_create', 'select_tab', 'list_tabs', 'new_tab', 'execute_js', 'get_page_text',
         'resize_window', 'zoom', 'click_ref', 'type_ref', 'hover_ref', 'read_page_content',
-        'cdp_click', 'cdp_type', 'cdp_key', 'cdp_drag', 'read_console', 'read_network', 'close_tab'
+        'cdp_click', 'cdp_type', 'cdp_key', 'cdp_drag', 'read_console', 'read_network', 'close_tab', 'upload_file'
     ]
 
     static isKnownAction(type) {
@@ -119,6 +119,7 @@ class AutomationEngine {
             case 'read_network': return 'Read network requests'
             case 'download': return `Download ${p.filename || p.url}`
             case 'close_tab': return p.tabId ? `Close tab ${p.tabId}` : 'Close the current tab'
+            case 'upload_file': return p.ref !== '' ? `Upload a file into [ref=${p.ref}]` : `Upload a file into "${p.selector}"`
             default: return String(action.type)
         }
     }

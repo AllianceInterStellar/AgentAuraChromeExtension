@@ -55,6 +55,8 @@ const I18n = (() => {
             'approval.allowSite': 'Always allow on {site}',
             'approval.download': 'The page wants to download "{name}" from {url}',
             'approval.financial': 'payment or finance page, every change asks',
+            'approval.upload': 'Choose the file(s) to attach. Nothing is uploaded until you approve.',
+            'approval.filesChosen': '{count} file(s), {kb} KB',
 
             // Plan
             'plan.title': 'Execution Plan',
@@ -132,6 +134,8 @@ const I18n = (() => {
             'sys.downloadBlocked': 'Download not allowed: {name}',
             'sys.downloadAllowed': 'Download started: {name}',
             'sys.downloadFailed': 'The download could not be started: {name} ({error})',
+            'sys.uploadNoFile': 'No file was chosen; the upload was skipped.',
+            'sys.uploadTooLarge': 'The chosen files total {mb} MB; the limit is {limit} MB.',
             'sys.stoppedWithErrors': 'Stopped with errors',
             'sys.actionFailed': 'Action failed: {error}',
             'sys.actionError': 'Action error: {msg}',
@@ -532,6 +536,7 @@ const I18n = (() => {
             'action.desc.read_network': 'Read network requests',
             'action.desc.download': 'Download {filename}',
             'action.desc.close_tab': 'Close tab {tabId}',
+            'action.desc.upload_file': 'Upload a file into [ref={ref}]',
 
             // Manage page: errors are shown instead of swallowed
             'auth.guestFailed': 'Guest sign-in failed',
@@ -606,6 +611,8 @@ const I18n = (() => {
             'approval.allowSite': '在 {site} 上始终允许',
             'approval.download': '页面要从 {url} 下载「{name}」',
             'approval.financial': '支付或金融页面，每次更改都需确认',
+            'approval.upload': '请选择要附加的文件。在你批准之前不会上传任何内容。',
+            'approval.filesChosen': '{count} 个文件，{kb} KB',
 
             // Plan
             'plan.title': '执行计划',
@@ -683,6 +690,8 @@ const I18n = (() => {
             'sys.downloadBlocked': '未允许下载：{name}',
             'sys.downloadAllowed': '已开始下载：{name}',
             'sys.downloadFailed': '无法开始下载：{name}（{error}）',
+            'sys.uploadNoFile': '未选择文件，已跳过上传。',
+            'sys.uploadTooLarge': '所选文件共 {mb} MB，上限为 {limit} MB。',
             'sys.stoppedWithErrors': '因错误停止',
             'sys.actionFailed': '操作失败: {error}',
             'sys.actionError': '操作错误: {msg}',
@@ -1083,6 +1092,7 @@ const I18n = (() => {
             'action.desc.read_network': '读取网络请求',
             'action.desc.download': '下载 {filename}',
             'action.desc.close_tab': '关闭标签页 {tabId}',
+            'action.desc.upload_file': '向 [ref={ref}] 上传文件',
 
             // 管理页：错误会显示出来而不是被吞掉
             'auth.guestFailed': '访客登录失败',

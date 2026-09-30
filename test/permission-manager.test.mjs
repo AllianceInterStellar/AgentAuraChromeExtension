@@ -225,14 +225,18 @@ test('on a payment or finance page every change asks, in act mode too; reading d
     await pm.removeSite('shop.com')
 })
 
-test('a download asks in every mode and "approve all" does not cover it', async () => {
+test('a download and a file upload ask in every mode and "approve all" does not cover them', async () => {
     for (const mode of ['ask', 'act', 'plan']) {
-        let asked = 0
-        const pm = manager(mode, () => { asked++; return 'approve' })
-        pm.approveAllForRun = true
-        const result = await pm.checkPermission({ type: 'download', url: 'https://x.com/report.pdf', filename: 'report.pdf' }, { url: 'https://x.com/report.pdf' })
-        assert.equal(result.approved, true, mode)
-        assert.equal(asked, 1, mode)
+        for (const action of [{ type: 'download', url: 'https://x.com/report.pdf', filename: 'report.pdf' }, { type: 'upload_file', ref: 3 }]) {
+            let asked = 0
+            const pm = manager(mode, () => { asked++; return 'approve' })
+            pm.approveAllForRun = true
+            await pm.allowSite('x.com')
+            const result = await pm.checkPermission(action, { url: 'https://x.com/report.pdf' })
+            assert.equal(result.approved, true, `${mode} ${action.type}`)
+            assert.equal(asked, 1, `${mode} ${action.type}`)
+            await pm.removeSite('x.com')
+        }
     }
 })
 

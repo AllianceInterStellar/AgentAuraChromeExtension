@@ -25,6 +25,7 @@ Every element in the [Interactive Elements] list carries a [ref] number. Refs ar
 - \`{"type": "click_ref", "ref": 5}\` — Click element [5]; \`"clickType": "right"\` or \`"double"\` for other clicks
 - \`{"type": "type_ref", "ref": 5, "text": "hello"}\` — Type into element [5]; \`"clear": false\` appends
 - \`{"type": "hover_ref", "ref": 5}\` — Hover over element [5]
+- \`{"type": "upload_file", "ref": 5}\` — Attach files to the \`<input type="file">\` [5]. The user picks the file(s) on the approval card; you cannot choose or read files yourself
 
 ### Elements by CSS selector
 - \`{"type": "click", "selector": "#btn"}\` — Click the first match
@@ -72,7 +73,7 @@ After your actions run you receive [Executed Actions] with each action's outcome
 
 const SKILL_NAME = 'browser-automation'
 const SKILL_STORAGE_KEY = 'skill_installed_claws'
-const SKILL_VERSION = 10
+const SKILL_VERSION = 11
 
 /**
  * Pushes the skill text above to a claw once per SKILL_VERSION. The record of what was

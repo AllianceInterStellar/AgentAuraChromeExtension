@@ -68,6 +68,7 @@ const sidepanel = (() => {
         '- Navigation: navigate(url) · new_tab(url) · select_tab(targetTabId) · close_tab(targetTabId?) · list_tabs',
         '- Elements by [ref] from the element list: click_ref(ref, clickType?=left|right|double) · type_ref(ref, text, clear?=true) · hover_ref(ref)',
         '- Elements by CSS selector: click(selector) · type(selector, text) · form_input(selector, value | checked) · find(selector) → up to 20 matches',
+        '- Files: upload_file(ref | selector) on an <input type=file>. The user picks the file(s) on the approval card; you cannot choose or read files yourself.',
         '- Keyboard and mouse: cdp_key(key, modifiers?) e.g. "Enter", "Tab", "a" · cdp_type(text) into the focused element · cdp_click(x, y, button?, clickCount?) · cdp_drag(startX, startY, endX, endY)',
         '- Reading: read_page_content(filter?=interactive|all) → element list with [ref] ids · get_page_text → visible text · screenshot(save?) → image attached to your next turn (not sent automatically; ask when the element list is not enough; save: true also writes it to the downloads folder) · read_console(pattern?, level?) · read_network(pattern?, includeBody?) · execute_js(code) → value of the expression (always asks the user)',
         '- Window: scroll(direction=up|down|left|right, amount?=300) · wait(duration ms, ≤30000) · zoom(level) · resize_window(width, height)',
@@ -97,6 +98,9 @@ const sidepanel = (() => {
     let currentScheduledTask = null
     /** The organization's managed policy (chrome.storage.managed), normalised by the worker. */
     let policy = { AllowedSites: [], BlockedSites: [], AllowedPermissionModes: [], DisableExecuteJs: false, DisableScheduledTasks: false, DisableUnattendedRuns: false }
+    /** Files the user picked on the approval card for an upload_file action. */
+    let pendingUploadFiles = null
+    const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
     /** The "/" palette: saved shortcuts filtered by what follows the slash. */
     let paletteOpen = false
     const SLASH_COMMANDS = new Set(['/vision-test', '/diag'])
@@ -315,6 +319,16 @@ const sidepanel = (() => {
 
         $('#sp-btn-deny').addEventListener('click', () => permissionManager.deny())
         $('#sp-btn-approve').addEventListener('click', () => permissionManager.approve())
+        // upload_file: the approval card carries a file picker (a user gesture the agent cannot
+        // fake); Approve stays disabled until something was chosen.
+        $('#sp-approval-file').addEventListener('change', (e) => {
+            const files = Array.from(e.target.files || [])
+            pendingUploadFiles = files
+            const total = files.reduce((n, f) => n + f.size, 0)
+            const info = $('#sp-approval-file-info')
+            if (info) info.textContent = files.length ? I18n.t('approval.filesChosen', { count: files.length, kb: Math.max(1, Math.round(total / 1024)) }) : ''
+            $('#sp-btn-approve').disabled = files.length === 0
+        })
         $('#sp-btn-approve-site').addEventListener('click', async () => {
             const site = await permissionManager.approveSite()
             if (site) addSystemMessage(I18n.t('sys.siteAllowed', { site }))
@@ -1266,6 +1280,22 @@ const sidepanel = (() => {
         // `current` gains `confirmedSensitive` once the user has confirmed typing into a
         // password or card field; the worker refuses such a field until it does.
         let current = action
+
+        // upload_file: the files the user just chose on the card travel with the action.
+        if (action.type === 'upload_file') {
+            const chosen = pendingUploadFiles
+            pendingUploadFiles = null
+            if (!chosen || !chosen.length) {
+                addSystemMessage(I18n.t('sys.uploadNoFile'))
+                return { success: false, error: I18n.t('sys.uploadNoFile') }
+            }
+            try {
+                current = { ...action, files: await readUploadFiles(chosen) }
+            } catch (e) {
+                addSystemMessage(e.message)
+                return { success: false, error: e.message }
+            }
+        }
         for (let attempt = 1; attempt <= MAX_ACTION_RETRIES; attempt++) {
             if (!runIsCurrent(runId)) return { success: false, error: I18n.t('sys.stopped') }
             try {
@@ -1338,6 +1368,20 @@ const sidepanel = (() => {
         notifyAgentGroupState('error')
         addSystemMessage(I18n.t('sys.maxRetriesFailedAction', { action: automationEngine.describeAction(action) }))
         return finalResult
+    }
+
+    /** The chosen files as `{ name, type, data }` with base64 data, at most MAX_UPLOAD_BYTES in all. */
+    async function readUploadFiles(files) {
+        const total = files.reduce((n, f) => n + f.size, 0)
+        if (total > MAX_UPLOAD_BYTES) {
+            throw new Error(I18n.t('sys.uploadTooLarge', { mb: (total / 1048576).toFixed(1), limit: Math.round(MAX_UPLOAD_BYTES / 1048576) }))
+        }
+        return Promise.all(files.map(file => new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve({ name: file.name, type: file.type, data: String(reader.result).split(',')[1] || '' })
+            reader.onerror = () => reject(reader.error || new Error('read failed'))
+            reader.readAsDataURL(file)
+        })))
     }
 
     function shouldRetryAction(action, result, attempt) {
@@ -2303,6 +2347,17 @@ const sidepanel = (() => {
             warning.textContent = show ? I18n.t('approval.sensitive', { field: action.fieldLabel || action.type }) : ''
             warning.classList.toggle('hidden', !show)
         }
+        const upload = $('#sp-approval-upload')
+        if (upload) {
+            const show = action.type === 'upload_file'
+            upload.classList.toggle('hidden', !show)
+            pendingUploadFiles = null
+            const picker = $('#sp-approval-file')
+            if (picker) picker.value = ''
+            const info = $('#sp-approval-file-info')
+            if (info) info.textContent = show ? I18n.t('approval.upload') : ''
+            $('#sp-btn-approve').disabled = show
+        }
 
         lastFocusBeforeOverlay = document.activeElement
         overlay.classList.remove('hidden')
@@ -2330,6 +2385,7 @@ const sidepanel = (() => {
     function hideApprovalOverlays() {
         $('#sp-approval-overlay').classList.add('hidden')
         $('#sp-plan-overlay').classList.add('hidden')
+        $('#sp-btn-approve').disabled = false
         if (lastFocusBeforeOverlay && typeof lastFocusBeforeOverlay.focus === 'function') {
             try { lastFocusBeforeOverlay.focus() } catch (_) { }
         }

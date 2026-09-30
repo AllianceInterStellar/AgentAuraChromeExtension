@@ -24,7 +24,9 @@ const ERR = {
     /** The page did not answer a script within the time limit (a dialog is the usual reason). */
     TIMEOUT: 'TIMEOUT',
     /** Forbidden by the organization's managed policy. */
-    POLICY: 'POLICY'
+    POLICY: 'POLICY',
+    /** upload_file arrived without the files the user chooses on the approval card. */
+    NO_FILES: 'NO_FILES'
 }
 
 /** How long a script in the page may take before the action is given up. */
@@ -109,7 +111,7 @@ const CONTENT_SCRIPTS = [
 ]
 const CONTENT_MESSAGE_TYPES = new Set([
     'GET_ACCESSIBILITY_TREE', 'GET_PAGE_STRUCTURE', 'GET_PAGE_CONTENT',
-    'CLICK_ELEMENT_BY_REF', 'TYPE_IN_ELEMENT_BY_REF', 'HOVER_ELEMENT_BY_REF', 'GET_ELEMENT_RECT',
+    'CLICK_ELEMENT_BY_REF', 'TYPE_IN_ELEMENT_BY_REF', 'HOVER_ELEMENT_BY_REF', 'SET_FILES_BY_REF', 'GET_ELEMENT_RECT',
     'INDICATOR_SHOW', 'INDICATOR_HIDE', 'INDICATOR_COMPLETE', 'INDICATOR_ERROR',
     'INDICATOR_TIMELINE', 'INDICATOR_CLICK', 'INDICATOR_HIGHLIGHT'
 ])
@@ -963,6 +965,19 @@ async function runAgentAction(action, tab) {
             return await sendToTab(tab.id, {
                 type: 'HOVER_ELEMENT_BY_REF',
                 refId: action.ref
+            })
+
+        case 'upload_file':
+            // The model names the field; the user picks the files on the approval card, and
+            // the side panel attaches them here. Nothing reaches the page without that.
+            if (!Array.isArray(action.files) || !action.files.length) {
+                return fail(ERR.NO_FILES, 'No file was chosen; the user picks the file on the approval card')
+            }
+            return await sendToTab(tab.id, {
+                type: 'SET_FILES_BY_REF',
+                refId: action.ref,
+                selector: action.selector,
+                files: action.files
             })
 
         case 'read_page_content':
