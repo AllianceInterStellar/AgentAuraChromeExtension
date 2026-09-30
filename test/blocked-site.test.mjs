@@ -103,6 +103,16 @@ test('matchesPattern: a regular expression when it parses, a substring otherwise
     assert.equal(matchesPattern(undefined, 'x'), false)
 })
 
+test('dialogAnswer: an alert is dismissed, everything else is declined', () => {
+    const { dialogAnswer } = exports['js/background.js']
+    // Objects made inside the vm have another realm's prototype; compare the field.
+    assert.equal(dialogAnswer('alert').accept, true)
+    assert.equal(dialogAnswer('confirm').accept, false)
+    assert.equal(dialogAnswer('prompt').accept, false)
+    assert.equal(dialogAnswer('beforeunload').accept, false, 'the page and its unsaved form stay')
+    assert.equal(dialogAnswer(undefined).accept, false)
+})
+
 test('the worker exports what the tests and the side panel rely on', () => {
     const api = exports['js/background.js']
     assert.equal(api.isBlockedSite, isBlockedSite)
@@ -111,6 +121,7 @@ test('the worker exports what the tests and the side panel rely on', () => {
     assert.equal(api.ERR.BLOCKED_SITE, 'BLOCKED_SITE')
     assert.equal(api.ERR.SENSITIVE_FIELD, 'SENSITIVE_FIELD')
     assert.equal(api.ERR.INVALID_URL, 'INVALID_URL')
+    assert.equal(api.ERR.TIMEOUT, 'TIMEOUT')
     for (const [name, code] of Object.entries(api.ERR)) {
         assert.equal(name, code, 'error codes read the same as their names')
     }

@@ -55,6 +55,20 @@ test('read_network: method, url, status and mime type', () => {
     assert.equal(out, '2 requests:\nPOST https://e.com/api → 201 application/json\nGET https://e.com/x')
 })
 
+test('read_network: a response body rides under its request when it was asked for', () => {
+    const out = sum({ type: 'read_network' }, { success: true, requests: [{ method: 'GET', url: 'https://e.com/api', status: 200, mimeType: 'application/json', body: '{"a":1}' }] })
+    assert.equal(out, '1 requests:\nGET https://e.com/api → 200 application/json\n  body: {"a":1}')
+})
+
+test('a dialog the page opened is reported with any result, and never as a plain field', () => {
+    const dialogs = [{ type: 'confirm', message: 'Delete everything?', accepted: false }]
+    const click = sum({ type: 'click' }, { success: true, dialogs })
+    assert.equal(click, 'page dialog confirm: "Delete everything?" — declined automatically; do not trigger dialogs')
+    const text = sum({ type: 'get_page_text' }, { success: true, text: 'hi', dialogs: [{ type: 'alert', message: 'Hi!', accepted: true }] })
+    assert.equal(text, 'text (2 chars):\nhi\npage dialog alert: "Hi!" — dismissed automatically; do not trigger dialogs')
+    assert.equal(sum({ type: 'click' }, { success: true }), null)
+})
+
 test('list_tabs, new_tab and screenshot', () => {
     assert.equal(sum({ type: 'list_tabs' }, { success: true, tabs: [{ id: 3, title: 'A', url: 'https://a', active: true }, { id: 4, title: 'B', url: 'https://b' }] }),
         'tab 3 (active): A | https://a\ntab 4: B | https://b')

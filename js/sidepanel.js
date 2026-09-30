@@ -63,7 +63,7 @@ const sidepanel = (() => {
         '- Elements by [ref] from the element list: click_ref(ref, clickType?=left|right|double) · type_ref(ref, text, clear?=true) · hover_ref(ref)',
         '- Elements by CSS selector: click(selector) · type(selector, text) · form_input(selector, value | checked) · find(selector) → up to 20 matches',
         '- Keyboard and mouse: cdp_key(key, modifiers?) e.g. "Enter", "Tab", "a" · cdp_type(text) into the focused element · cdp_click(x, y, button?, clickCount?) · cdp_drag(startX, startY, endX, endY)',
-        '- Reading: read_page_content(filter?=interactive|all) → element list with [ref] ids · get_page_text → visible text · screenshot → image attached to your next turn (not sent automatically; ask when the element list is not enough) · read_console(pattern?, level?) · read_network(pattern?) · execute_js(code) → value of the expression (always asks the user)',
+        '- Reading: read_page_content(filter?=interactive|all) → element list with [ref] ids · get_page_text → visible text · screenshot → image attached to your next turn (not sent automatically; ask when the element list is not enough) · read_console(pattern?, level?) · read_network(pattern?, includeBody?) · execute_js(code) → value of the expression (always asks the user)',
         '- Window: scroll(direction=up|down|left|right, amount?=300) · wait(duration ms, ≤30000) · zoom(level) · resize_window(width, height)',
         '',
         'After your actions run you get [Executed Actions] with each outcome, [Action Results] with what the reading actions returned, and the fresh [Page State].',
@@ -84,6 +84,9 @@ const sidepanel = (() => {
     let pendingRunModeOverride = null
     /** The old behaviour, as a setting: a screenshot on every turn whatever the element list says. */
     let screenshotEveryTurn = false
+    /** Failed turns in a row. After MAX_CONSECUTIVE_FAILURES the run stops and asks the user. */
+    let consecutiveFailures = 0
+    const MAX_CONSECUTIVE_FAILURES = 3
 
     // Codes the worker attaches to a failed action. Only these are worth a retry; the message
     // text is translated and never inspected.
@@ -428,6 +431,7 @@ const sidepanel = (() => {
         automationEngine.reset()
         permissionManager.beginRun({ modeOverride: pendingRunModeOverride })
         pendingRunModeOverride = null
+        consecutiveFailures = 0
         agentStepCount = 0
         llmRoundCount = 0
         nativeToolRetryCount = 0
@@ -584,12 +588,21 @@ const sidepanel = (() => {
                 // A screenshot the model asked for is the one attached to the next turn;
                 // gatherPageContext does not take a second one on top of it.
                 if (execution.failedAction) {
+                    // Three failed turns in a row: the model is not going to get there by
+                    // itself, and every further turn costs the user money and patience.
+                    consecutiveFailures++
+                    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                        addSystemMessage(I18n.t('sys.tooManyFailures', { count: consecutiveFailures, error: execution.failedResult?.error || '' }))
+                        finishAgentLoop(runId, 'error')
+                        return
+                    }
                     await new Promise(r => setTimeout(r, 400))
                     const recoveryContext = await gatherPageContext(true, execution.screenshot)
                     const recoveryTabs = await gatherTabContext()
                     const recoveryMsg = buildRecoveryMessage(execution.failedAction, execution.failedResult, recoveryContext, recoveryTabs, execution.executed)
                     await continueAgentLoop(runId, recoveryMsg, buildMessageAttachments(recoveryContext))
                 } else {
+                    if (execution.executed.length) consecutiveFailures = 0
                     await new Promise(r => setTimeout(r, 500))
                     const verifyContext = await gatherPageContext(true, execution.screenshot)
                     const verifyTabs = await gatherTabContext()
@@ -613,12 +626,44 @@ const sidepanel = (() => {
         agentLoopRunning = false
         updateGeneratingUI()
         hideAgentBanner()
+        settleIndicator(groupStatus)
         stopMonitoring()
+    }
+
+    /**
+     * The on-page badge used to pulse "working" until the next navigation, whatever had
+     * happened. Only for a run that acted on the page: sending to a tab injects the content
+     * scripts, which a run that never touched the page has no business doing.
+     */
+    function settleIndicator(groupStatus) {
+        const tabId = automationEngine.activeTabId || monitoredTabId
+        if (!tabId || agentStepCount === 0) return
+        // The content script hides the badge itself a few seconds after either of these.
+        const type = groupStatus === 'error' ? 'INDICATOR_ERROR' : 'INDICATOR_COMPLETE'
+        sendTab({ type, tabId, message: groupStatus === 'error' ? I18n.t('sys.stoppedWithErrors') : undefined }).catch(() => { })
+    }
+
+    /**
+     * The tab this run drives. Pinned at run start and moved only by the actions that change
+     * tabs (new_tab, select_tab, close_tab). The tab the user happens to be looking at is not
+     * consulted any more: switching tabs mid-run used to redirect the agent's clicks there.
+     */
+    async function runTab() {
+        if (automationEngine.activeTabId) {
+            try {
+                return await chrome.tabs.get(automationEngine.activeTabId)
+            } catch (_) {
+                automationEngine.activeTabId = null
+            }
+        }
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+        if (tab && tab.id) automationEngine.activeTabId = tab.id
+        return tab || null
     }
 
     async function startMonitoring() {
         try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+            const tab = await runTab()
             if (tab) {
                 const res = await chrome.runtime.sendMessage({ type: 'AGENT_START_MONITORING', tabId: tab.id })
                 monitoredTabId = res && res.tabId ? res.tabId : tab.id
@@ -651,7 +696,7 @@ const sidepanel = (() => {
 
     async function gatherPageContext(includeAccessibilityTree = false, attachedScreenshot = null) {
         try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+            const tab = await runTab()
             if (!tab || !tab.id) return { url: 'unknown', title: '', noPage: true }
 
             const isSpecialPage = !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')
@@ -716,20 +761,21 @@ const sidepanel = (() => {
 
     async function gatherTabContext() {
         try {
-            const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-            if (!activeTab || !activeTab.id) {
+            const current = await runTab()
+            if (!current || !current.id) {
                 return { currentTabId: null, tabs: [] }
             }
 
-            const tabs = await tabManager.listTabs(activeTab.id)
+            const tabs = await tabManager.listTabs(current.id)
             updateTabCount()
             return {
-                currentTabId: activeTab.id,
+                currentTabId: current.id,
                 tabs: (tabs || []).map(tab => ({
                     id: tab.id,
                     title: tab.title || I18n.t('ctx.untitledTab'),
                     url: tab.url || '',
-                    active: !!tab.active
+                    // "current" is the tab the run drives, not the one the user is looking at.
+                    active: tab.id === current.id
                 }))
             }
         } catch (_) {
@@ -739,7 +785,7 @@ const sidepanel = (() => {
 
     async function refreshAccessibilityTree() {
         try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+            const tab = await runTab()
             if (tab && tab.id && tab.url && !tab.url.startsWith('chrome://')) {
                 const res = await sendTab({
                     type: 'GET_PAGE_CONTENT',
@@ -1018,6 +1064,9 @@ const sidepanel = (() => {
             }
             // The image itself rides along as an attachment; the summary only says so.
             if (action.type === 'screenshot' && result && result.dataUrl) screenshot = result.dataUrl
+            // The actions that move the run to another tab.
+            if ((action.type === 'new_tab' || action.type === 'tabs_create') && result && result.tabId) automationEngine.activeTabId = result.tabId
+            if (action.type === 'select_tab' && action.targetTabId) automationEngine.activeTabId = action.targetTabId
 
             if (i < actions.length - 1 && DOM_CHANGING_ACTIONS.has(action.type)) {
                 await new Promise(r => setTimeout(r, 300))
@@ -1045,10 +1094,7 @@ const sidepanel = (() => {
 
         notifyAgentGroupState('running')
 
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-        if (tab && tab.id) {
-            automationEngine.activeTabId = tab.id
-        }
+        const tab = await runTab()
 
         // `current` gains `confirmedSensitive` once the user has confirmed typing into a
         // password or card field; the worker refuses such a field until it does.

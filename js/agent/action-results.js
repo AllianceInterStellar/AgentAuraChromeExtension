@@ -45,6 +45,22 @@ const ActionResults = {
         if (result === null || typeof result !== 'object') return clip(String(result), limits.value)
         if (result.error) return null
 
+        const summary = ActionResults.summarizeBody(type, result, limits)
+        const dialogNote = ActionResults.describeDialogs(result.dialogs, limits)
+        if (!dialogNote) return summary
+        return summary ? `${summary}\n${dialogNote}` : dialogNote
+    },
+
+    /** Dialogs the page opened during the action, answered by the extension. */
+    describeDialogs(list, limits = ActionResults.LIMITS) {
+        if (!Array.isArray(list) || !list.length) return null
+        return list.slice(0, 5).map(d =>
+            ActionResults.clip(`page dialog ${d.type || 'dialog'}: "${d.message || ''}" — ${d.accepted ? 'dismissed' : 'declined'} automatically; do not trigger dialogs`, limits.line)
+        ).join('\n')
+    },
+
+    summarizeBody(type, result, limits) {
+        const clip = (v, n) => ActionResults.clip(v, n)
         switch (type) {
             case 'get_page_text':
             case 'read_page': {
@@ -83,7 +99,10 @@ const ActionResults = {
                 if (!requests.length) return 'no network requests'
                 const shown = requests.slice(-limits.lines)
                 const note = shown.length < requests.length ? `, last ${shown.length} shown` : ''
-                const lines = shown.map(r => clip(`${r.method || 'GET'} ${r.url || ''}${r.status ? ` → ${r.status}` : ''}${r.mimeType ? ` ${r.mimeType}` : ''}`, limits.line))
+                const lines = shown.map(r => {
+                    const head = clip(`${r.method || 'GET'} ${r.url || ''}${r.status ? ` → ${r.status}` : ''}${r.mimeType ? ` ${r.mimeType}` : ''}`, limits.line)
+                    return r.body !== undefined ? `${head}\n  body: ${clip(r.body, limits.value)}` : head
+                })
                 return `${requests.length} requests${note}:\n${lines.join('\n')}`
             }
 
@@ -106,7 +125,7 @@ const ActionResults = {
                 return clip(ActionResults.stringify(result), limits.value)
 
             default: {
-                const keys = Object.keys(result).filter(k => k !== 'success' && k !== 'code')
+                const keys = Object.keys(result).filter(k => k !== 'success' && k !== 'code' && k !== 'dialogs')
                 if (!keys.length) return null
                 const subset = {}
                 for (const k of keys) subset[k] = result[k]

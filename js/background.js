@@ -20,8 +20,13 @@ const ERR = {
     /** A navigation target that is not http(s). */
     INVALID_URL: 'INVALID_URL',
     /** A screenshot of a tab that is not the visible one. */
-    NOT_VISIBLE: 'NOT_VISIBLE'
+    NOT_VISIBLE: 'NOT_VISIBLE',
+    /** The page did not answer a script within the time limit (a dialog is the usual reason). */
+    TIMEOUT: 'TIMEOUT'
 }
+
+/** How long a script in the page may take before the action is given up. */
+const EXEC_TIMEOUT_MS = 15000
 
 const fail = (code, error, extra = {}) => ({ success: false, code, error: error || code, ...extra })
 
@@ -197,6 +202,8 @@ let agentTabs = new Map()
 let debuggerAttached = new Map()
 let consoleMessages = new Map()
 let networkRequests = new Map()
+/** Dialogs the page opened during a run, per tab, answered automatically and reported to the model. */
+let dialogs = new Map()
 let tabGroupStateLoaded = false
 let agentGroupState = {
     mainTabId: null,
@@ -477,6 +484,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     debuggerAttached.delete(tabId)
     consoleMessages.delete(tabId)
     networkRequests.delete(tabId)
+    dialogs.delete(tabId)
 
     if (!agentTabs.has(tabId)) return
     agentTabs.delete(tabId)
@@ -540,10 +548,30 @@ async function handleAgentAction(action, tabId) {
     const tab = await resolveTab(tabId)
     if (!tab) return fail(ERR.NO_TAB, 'No active tab')
 
+    // With a tab group in place the run is confined to it: a tab outside the group is refused
+    // rather than acted on. Without a group (tab groups switched off, or the API unavailable)
+    // there is nothing to confine to.
+    if (agentTabGroupId && tabId && tab.groupId !== agentTabGroupId) {
+        return fail(ERR.TAB_NOT_IN_GROUP, 'That tab is not in the agent tab group')
+    }
+
     if (await isSiteBlocked(tab.url)) {
         return fail(ERR.BLOCKED_SITE, 'This site is off limits for security reasons')
     }
 
+    const result = await runAgentAction(action, tab)
+
+    // A dialog the page opened while the action ran was answered for it (see the debugger
+    // event listener); the model is told, because the page it sees next is not the one it
+    // expected.
+    const seen = dialogs.get(tab.id)
+    if (seen && seen.length && result && typeof result === 'object' && !Array.isArray(result)) {
+        result.dialogs = seen.splice(0)
+    }
+    return result
+}
+
+async function runAgentAction(action, tab) {
     switch (action.type) {
         case 'click':
             return await execFunc(tab.id, (selector) => {
@@ -773,12 +801,24 @@ async function handleAgentAction(action, tabId) {
                     && (!action.level || String(m.level).toLowerCase() === String(action.level).toLowerCase()))
             }
 
-        case 'read_network':
-            return {
-                success: true,
-                requests: (networkRequests.get(tab.id) || []).filter(r =>
-                    matchesPattern(`${r.method} ${r.url} ${r.status || ''} ${r.mimeType || ''}`, action.pattern))
+        case 'read_network': {
+            const requests = (networkRequests.get(tab.id) || [])
+                .filter(r => matchesPattern(`${r.method} ${r.url} ${r.status || ''} ${r.mimeType || ''}`, action.pattern))
+                .map(r => ({ ...r }))
+            // Bodies on request only, for the last few matches: the debugger has to still be
+            // attached, and Chrome keeps a body only while the page does.
+            if (action.includeBody && debuggerAttached.has(tab.id)) {
+                for (const r of requests.slice(-5)) {
+                    try {
+                        const body = await chrome.debugger.sendCommand({ tabId: tab.id }, 'Network.getResponseBody', { requestId: r.id })
+                        r.body = body.base64Encoded ? `[binary body, ${Math.round(body.body.length * 3 / 4)} bytes]` : String(body.body).slice(0, 16000)
+                    } catch (e) {
+                        r.body = `[body unavailable: ${e.message}]`
+                    }
+                }
             }
+            return { success: true, requests }
+        }
 
         default:
             return fail(ERR.UNKNOWN_ACTION, `Unknown action type: ${action.type}`)
@@ -1125,12 +1165,17 @@ async function getPageText(tabId) {
  */
 async function execFunc(tabId, func, args, world = 'ISOLATED') {
     const safeArgs = (args || []).map(v => v === undefined || v === null ? '' : v)
-    const results = await chrome.scripting.executeScript({
-        target: { tabId },
-        func,
-        args: safeArgs,
-        world
+    // A page that has an alert() open never answers; without the deadline the whole run
+    // hung on it until the user found and closed the dialog.
+    let timer
+    const deadline = new Promise(resolve => {
+        timer = setTimeout(() => resolve(fail(ERR.TIMEOUT, `The page did not answer within ${EXEC_TIMEOUT_MS / 1000} s; a dialog may be open`)), EXEC_TIMEOUT_MS)
     })
+    const results = await Promise.race([
+        chrome.scripting.executeScript({ target: { tabId }, func, args: safeArgs, world }),
+        deadline
+    ]).finally(() => clearTimeout(timer))
+    if (results && results.code === ERR.TIMEOUT) return results
     if (!results || !results.length) return fail(ERR.NO_RESULT, 'No result returned')
     const value = results[0].result
     // `0`, `''` and `false` are legitimate results of execute_js; only a missing frame result
@@ -1184,9 +1229,13 @@ async function startMonitoring(tabId) {
     await attachDebugger(tab.id)
     consoleMessages.set(tab.id, [])
     networkRequests.set(tab.id, [])
+    dialogs.set(tab.id, [])
 
     await chrome.debugger.sendCommand({ tabId: tab.id }, 'Console.enable')
     await chrome.debugger.sendCommand({ tabId: tab.id }, 'Network.enable')
+    // Page events: the one that matters is javascriptDialogOpening, answered below so an
+    // alert() cannot freeze the run.
+    try { await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.enable') } catch (_) { }
     await updateAgentGroupState({
         status: 'running',
         lastActiveTabId: tab.id
@@ -1202,15 +1251,41 @@ async function stopMonitoring(tabId) {
         try {
             await chrome.debugger.sendCommand({ tabId: tab.id }, 'Console.disable')
             await chrome.debugger.sendCommand({ tabId: tab.id }, 'Network.disable')
+            await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.disable')
         } catch (_) { }
+        // The run is over; Chrome's "is being debugged" bar used to stay until the tab closed.
+        await detachDebugger(tab.id)
     }
     consoleMessages.delete(tab.id)
     networkRequests.delete(tab.id)
+    dialogs.delete(tab.id)
     await updateAgentGroupState({ status: 'idle' })
+}
+
+/**
+ * What to answer a dialog the page opened during a run. An alert has only "OK". Everything
+ * else is declined: a confirm() the model did not mean to trigger must not delete anything,
+ * a prompt() gets no text, and a beforeunload dialog keeps the page (and its unsaved form).
+ */
+function dialogAnswer(type) {
+    return { accept: type === 'alert' }
 }
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
     const tabId = source.tabId
+    if (method === 'Page.javascriptDialogOpening' && params) {
+        const answer = dialogAnswer(params.type)
+        chrome.debugger.sendCommand({ tabId }, 'Page.handleJavaScriptDialog', answer).catch(() => { })
+        const note = `${params.type || 'dialog'}: ${String(params.message || '').substring(0, 300)} (${answer.accept ? 'dismissed' : 'declined'} automatically)`
+        const list = dialogs.get(tabId) || []
+        list.push({ type: params.type || 'dialog', message: String(params.message || '').substring(0, 300), accepted: answer.accept, timestamp: Date.now() })
+        if (list.length > 20) list.splice(0, list.length - 20)
+        dialogs.set(tabId, list)
+        const msgs = consoleMessages.get(tabId) || []
+        msgs.push({ level: 'dialog', text: note, url: params.url || '', timestamp: Date.now() })
+        if (msgs.length > 100) msgs.splice(0, msgs.length - 100)
+        consoleMessages.set(tabId, msgs)
+    }
     if (method === 'Console.messageAdded' && params?.message) {
         const msgs = consoleMessages.get(tabId) || []
         msgs.push({
@@ -1399,5 +1474,5 @@ async function openAgentForTab(tabId) {
 
 // Exposed for the unit tests, which load this file into a vm context with a stubbed `chrome`.
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { isBlockedSite, isHttpUrl, matchesPattern, mapKey, ERR }
+    module.exports = { isBlockedSite, isHttpUrl, matchesPattern, dialogAnswer, mapKey, ERR }
 }

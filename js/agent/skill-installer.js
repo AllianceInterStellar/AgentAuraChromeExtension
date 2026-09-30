@@ -42,7 +42,7 @@ Every element in the [Interactive Elements] list carries a [ref] number. Refs ar
 - \`{"type": "get_page_text"}\` — The page's visible text (up to 50 000 characters)
 - \`{"type": "screenshot"}\` — A screenshot of the visible tab, attached to your next turn. Screenshots are NOT sent automatically; ask when the element list is not enough (canvas, maps, images, layout questions)
 - \`{"type": "read_console", "pattern": "error"}\` — Console messages since the task started; \`pattern\` is a regular expression, \`"level": "error"\` filters by level
-- \`{"type": "read_network", "pattern": "/api/"}\` — Requests since the task started → method, url, status, mime type
+- \`{"type": "read_network", "pattern": "/api/", "includeBody": true}\` — Requests since the task started → method, url, status, mime type; \`includeBody\` adds the response body of the last few matches
 - \`{"type": "execute_js", "code": "document.title"}\` — Evaluate a JavaScript expression in the page and get its value. Always asks the user for confirmation
 
 ### Window
