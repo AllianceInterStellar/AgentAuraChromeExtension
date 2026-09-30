@@ -35,6 +35,7 @@ async function loadSettings() {
         'agent_settings',
         'agent_shortcuts',
         'agent_scheduled_tasks',
+        'agent_site_allow',
         'dev_api_url'
     ])
 
@@ -47,6 +48,9 @@ async function loadSettings() {
     document.getElementById('setting-blocked-sites').checked = settings.blockedSitesEnabled !== false
     document.getElementById('setting-tab-group').checked = settings.tabGroupEnabled !== false
     document.getElementById('setting-screenshot-every-turn').checked = settings.screenshotEveryTurn === true
+    document.getElementById('setting-financial-confirm').checked = settings.financialConfirmEnabled !== false
+    document.getElementById('setting-extra-blocked').value = hostList(settings.extraBlockedHosts).join('\n')
+    document.getElementById('setting-allowed-hosts').value = hostList(settings.allowedHosts).join('\n')
     document.getElementById('setting-max-steps').value = settings.maxSteps || 50
     document.getElementById('setting-screenshot-quality').value = settings.screenshotQuality || 80
 
@@ -55,6 +59,18 @@ async function loadSettings() {
 
     renderShortcuts(stored.agent_shortcuts || [])
     renderTasks(stored.agent_scheduled_tasks || [])
+    renderAllowedSites(stored.agent_site_allow || [])
+}
+
+/** Hostnames, one per line or comma-separated, lower-cased, without scheme or path, deduplicated. */
+function hostList(value) {
+    const raw = Array.isArray(value) ? value : String(value || '').split(/[\n,]/)
+    const out = []
+    for (const item of raw) {
+        const host = String(item || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+        if (host && /^[a-z0-9.-]+$/.test(host) && !out.includes(host)) out.push(host)
+    }
+    return out
 }
 
 async function saveSettings() {
@@ -69,6 +85,9 @@ async function saveSettings() {
             blockedSitesEnabled: document.getElementById('setting-blocked-sites').checked,
             tabGroupEnabled: document.getElementById('setting-tab-group').checked,
             screenshotEveryTurn: document.getElementById('setting-screenshot-every-turn').checked,
+            financialConfirmEnabled: document.getElementById('setting-financial-confirm').checked,
+            extraBlockedHosts: hostList(document.getElementById('setting-extra-blocked').value),
+            allowedHosts: hostList(document.getElementById('setting-allowed-hosts').value),
             maxSteps: Number.isFinite(maxSteps) ? clamp(maxSteps, 1, 500) : 50,
             screenshotQuality: Number.isFinite(quality) ? clamp(quality, 10, 100) : 80
         }
@@ -133,6 +152,30 @@ function renderTasks(tasks) {
             await chrome.storage.local.set({ agent_scheduled_tasks: updated })
             await chrome.alarms.clear('scheduled_task_' + id)
             renderTasks(updated)
+        })
+    })
+}
+
+function renderAllowedSites(sites) {
+    const list = document.getElementById('site-allow-list')
+    if (!list) return
+    if (!sites.length) {
+        list.innerHTML = '<div style="color: var(--text3); font-size: 12px; text-align: center; padding: 20px;">' + escapeHtml(I18n.t('options.noSites')) + '</div>'
+        return
+    }
+    list.innerHTML = sites.map(site => `
+        <div class="shortcut-item">
+            <span class="shortcut-text">${escapeHtml(site)}</span>
+            <button class="delete-btn" data-site="${escapeAttr(site)}" style="opacity:1">${escapeHtml(I18n.t('options.remove'))}</button>
+        </div>
+    `).join('')
+
+    list.querySelectorAll('[data-site]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const stored = await chrome.storage.local.get('agent_site_allow')
+            const updated = (stored.agent_site_allow || []).filter(s => s !== btn.dataset.site)
+            await chrome.storage.local.set({ agent_site_allow: updated })
+            renderAllowedSites(updated)
         })
     })
 }

@@ -103,6 +103,28 @@ test('matchesPattern: a regular expression when it parses, a substring otherwise
     assert.equal(matchesPattern(undefined, 'x'), false)
 })
 
+test('isFinancialSite: payment providers, exchanges, banks by host; checkout and billing by path', () => {
+    const { isFinancialSite } = exports['js/background.js']
+    for (const yes of ['https://www.paypal.com/myaccount', 'https://checkout.stripe.com/pay/cs_1', 'https://pro.coinbase.com/', 'https://www.chase.com/personal',
+        'https://shop.example.com/checkout', 'https://example.com/cart', 'https://example.com/account/billing', 'https://example.com/orders/123', 'https://app.example.com/subscribe']) {
+        assert.equal(isFinancialSite(yes), true, yes)
+    }
+    for (const no of ['https://example.com/', 'https://news.ycombinator.com/', 'https://example.com/docs/payments-api', 'https://notpaypal.com/', 'https://paypal.com.evil.example/', 'about:blank', '', null]) {
+        assert.equal(isFinancialSite(no), false, String(no))
+    }
+})
+
+test('hostMatches: exact host or subdomain, tolerant of a pasted URL', () => {
+    const { hostMatches } = exports['js/background.js']
+    assert.equal(hostMatches('example.com', ['example.com']), true)
+    assert.equal(hostMatches('a.b.example.com', ['example.com']), true)
+    assert.equal(hostMatches('notexample.com', ['example.com']), false)
+    assert.equal(hostMatches('example.com', ['https://Example.com/path']), true)
+    assert.equal(hostMatches('example.com', ['', '  ', null]), false)
+    assert.equal(hostMatches('example.com', 'example.com'), false, 'a list, not a string')
+    assert.equal(hostMatches('', ['example.com']), false)
+})
+
 test('dialogAnswer: an alert is dismissed, everything else is declined', () => {
     const { dialogAnswer } = exports['js/background.js']
     // Objects made inside the vm have another realm's prototype; compare the field.

@@ -135,8 +135,48 @@
             pageContent: lines.join('\n'),
             elementCount: tree.length,
             truncated: !!(tree.truncated || cutOff),
-            viewport: { width: window.innerWidth, height: window.innerHeight }
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            ...detectChallenges()
         }
+    }
+
+    const CAPTCHA_SELECTOR = [
+        'iframe[src*="recaptcha"]', 'iframe[src*="hcaptcha"]', 'iframe[src*="turnstile"]',
+        'iframe[src*="challenges.cloudflare.com"]', 'iframe[src*="arkoselabs"]', 'iframe[src*="geetest"]',
+        '.g-recaptcha', '.h-captcha', '.cf-turnstile', '[data-sitekey]', '#captcha', '.captcha',
+        '[id*="captcha" i]', '[class*="captcha" i]'
+    ].join(', ')
+    const CAPTCHA_TITLE = /captcha|verify you are human|are you a robot|just a moment|attention required|security check|access denied/i
+    const CAPTCHA_TEXT = /verify (that )?you are (a )?human|are you a robot|prove you are human|complete the security check|checking your browser/i
+
+    /**
+     * Whether the page is a sign-in form or a human check. The panel pauses the run on
+     * either and hands the page to the user, the way Claude in Chrome does: the agent has no
+     * business typing credentials or getting around a CAPTCHA.
+     *
+     * A sign-in page: a visible password field on a page with few other fields. A registration
+     * form has a password field too, but many more fields, and is not a reason to stop.
+     */
+    function detectChallenges(doc = document) {
+        const visible = (el) => { try { return isVisibleElement(el) } catch (_) { return false } }
+        let loginDetected = false
+        let captchaDetected = false
+        try {
+            const passwords = Array.from(doc.querySelectorAll('input[type="password"]')).filter(visible)
+            if (passwords.length) {
+                const fields = Array.from(doc.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="image"]), textarea')).filter(visible)
+                loginDetected = fields.length <= 3
+            }
+        } catch (_) { }
+        try {
+            captchaDetected = Array.from(doc.querySelectorAll(CAPTCHA_SELECTOR)).some(visible)
+        } catch (_) { }
+        if (!captchaDetected) {
+            const title = String(doc.title || '')
+            const text = String((doc.body && doc.body.innerText) || '').slice(0, 3000)
+            captchaDetected = CAPTCHA_TITLE.test(title) || CAPTCHA_TEXT.test(text)
+        }
+        return { loginDetected, captchaDetected }
     }
 
     function getImplicitRole(tag) {
@@ -323,6 +363,6 @@
     // For the unit tests, which load this file into a vm context. The content script runs in
     // the isolated world, where the page's own `module` (if it has one) is not visible.
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { isSensitiveField, fieldLabel }
+        module.exports = { isSensitiveField, fieldLabel, detectChallenges }
     }
 })()

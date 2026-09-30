@@ -66,7 +66,12 @@ const DEFAULT_SETTINGS = {
     maxSteps: 50,
     tabGroupEnabled: true,
     /** A screenshot on every model turn. Off: the panel sends one only when the element list is not enough or the model asks. */
-    screenshotEveryTurn: false
+    screenshotEveryTurn: false,
+    /** Every action that changes something on a payment or finance page asks first. */
+    financialConfirmEnabled: true,
+    /** Hostnames the user added to the blocklist, and hostnames excepted from it. */
+    extraBlockedHosts: [],
+    allowedHosts: []
 }
 
 const TAB_GROUP_STATE_KEY = 'agent_tab_group_state'
@@ -154,13 +159,69 @@ function isInternalUrl(url) {
     }
 }
 
-/** The rules plus the setting from the options page. */
+/**
+ * Payment providers, brokerages, exchanges and the like, plus the checkout and billing paths
+ * of any site. Not blocked: the user may well be shopping. But every action that changes
+ * something on such a page asks first, in every mode, as Claude in Chrome does before a
+ * purchase.
+ */
+const FINANCIAL_HOSTS = [
+    'paypal.com', 'venmo.com', 'cash.app', 'wise.com', 'revolut.com', 'stripe.com', 'checkout.stripe.com', 'klarna.com', 'affirm.com', 'afterpay.com',
+    'coinbase.com', 'binance.com', 'kraken.com', 'crypto.com', 'gemini.com', 'okx.com', 'bybit.com',
+    'robinhood.com', 'schwab.com', 'fidelity.com', 'vanguard.com', 'etrade.com', 'tdameritrade.com', 'interactivebrokers.com', 'webull.com',
+    'chase.com', 'wellsfargo.com', 'bankofamerica.com', 'citi.com', 'citibank.com', 'capitalone.com', 'usbank.com', 'pnc.com', 'americanexpress.com', 'discover.com',
+    'alipay.com', 'tenpay.com', 'unionpay.com', 'unionpayintl.com', 'paytm.com', 'phonepe.com', 'payoneer.com', 'skrill.com', 'zellepay.com'
+]
+const FINANCIAL_PATH_SEGMENTS = new Set(['checkout', 'payment', 'payments', 'pay', 'billing', 'cart', 'purchase', 'order', 'orders', 'buy', 'subscribe', 'transfer', 'withdraw', 'deposit'])
+
+/** Pure: whether the page is one where actions ask before running. Unit-tested. */
+function isFinancialSite(url) {
+    if (!url) return false
+    let parsed
+    try {
+        parsed = new URL(url)
+    } catch (_) {
+        return false
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+    const host = parsed.hostname.toLowerCase()
+    if (FINANCIAL_HOSTS.some(h => host === h || host.endsWith('.' + h))) return true
+    const segments = parsed.pathname.toLowerCase().split('/').filter(Boolean)
+    return segments.some(seg => FINANCIAL_PATH_SEGMENTS.has(seg))
+}
+
+/** `host` is `entry` or a subdomain of it, for the hostname lists the user keeps in Settings. */
+function hostMatches(host, entries) {
+    if (!host || !Array.isArray(entries)) return false
+    const h = String(host).toLowerCase()
+    return entries.some(raw => {
+        const e = String(raw || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+        return e && (h === e || h.endsWith('.' + e))
+    })
+}
+
+/**
+ * The rules plus the user's settings: the on/off switch, the sites they added to the
+ * blocklist, and the sites they excepted from it. Browser-internal pages stay off limits
+ * whatever the settings say.
+ */
 async function isSiteBlocked(url) {
     if (!url) return false
     if (isInternalUrl(url)) return true
     const settings = await getSettings()
+    let host = ''
+    try { host = new URL(url).hostname } catch (_) { return false }
+    if (hostMatches(host, settings.allowedHosts)) return false
+    if (hostMatches(host, settings.extraBlockedHosts)) return true
     if (settings.blockedSitesEnabled === false) return false
     return isBlockedSite(url)
+}
+
+/** Whether actions on the page ask before running, per the setting. */
+async function isSiteFinancial(url) {
+    const settings = await getSettings()
+    if (settings.financialConfirmEnabled === false) return false
+    return isFinancialSite(url)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -337,7 +398,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return respond(stopMonitoring(message.tabId).then(() => ({ success: true })))
 
         case 'CHECK_BLOCKED_SITE':
-            return respond(isSiteBlocked(message.url).then(blocked => ({ blocked })))
+            return respond(Promise.all([isSiteBlocked(message.url), isSiteFinancial(message.url)])
+                .then(([blocked, financial]) => ({ blocked, financial })))
+
+        // The side panel confirmed a download the worker had cancelled (see downloads.onCreated).
+        // Started by the extension itself, it carries byExtensionId and is not gated again.
+        case 'AGENT_DOWNLOAD_ALLOW':
+            return respond(allowDownload(message.url, message.filename))
 
         case 'GET_SETTINGS':
             return respond(getSettings().then(settings => ({ success: true, settings })))
@@ -524,6 +591,47 @@ chrome.tabGroups.onRemoved.addListener(async (group) => {
 chrome.debugger.onDetach.addListener((source) => {
     if (source.tabId !== undefined) debuggerAttached.delete(source.tabId)
 })
+
+// ---------------------------------------------------------------------------------------------
+// Downloads while the agent runs
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The model has no download action, but a navigate to an attachment URL, a click on an
+ * <a download> or a script that builds one starts a download all the same. While a run is
+ * going, any download the extension did not start itself is cancelled and handed to the side
+ * panel, which asks the user; on approval the worker starts it again (allowDownload). A
+ * download always asks, whatever the permission mode: that is the bar Claude in Chrome sets.
+ */
+chrome.downloads.onCreated.addListener(async (item) => {
+    try {
+        if (item.byExtensionId === chrome.runtime.id) return
+        await ensureTabGroupStateLoaded()
+        if (agentGroupState.status !== 'running' && agentGroupState.status !== 'approval') return
+        try { await chrome.downloads.cancel(item.id) } catch (_) { }
+        try { await chrome.downloads.erase({ id: item.id }) } catch (_) { }
+        const url = item.finalUrl || item.url || ''
+        const filename = String(item.filename || '').split(/[\\/]/).pop() || ''
+        chrome.runtime.sendMessage({
+            type: 'AGENT_DOWNLOAD_BLOCKED',
+            url,
+            filename,
+            mime: item.mime || '',
+            bytes: item.totalBytes > 0 ? item.totalBytes : (item.fileSize > 0 ? item.fileSize : 0)
+        }).catch(() => { })
+    } catch (e) {
+        console.error('[Background] download gate failed:', e)
+    }
+})
+
+async function allowDownload(url, filename) {
+    if (!isHttpUrl(url)) return fail(ERR.INVALID_URL, 'Only http(s) downloads can be restarted')
+    const options = { url }
+    // A bare, safe file name only: the downloads API treats anything else as a path.
+    if (filename && /^[\w.() -]{1,120}$/.test(filename) && !/^\.+$/.test(filename)) options.filename = filename
+    const id = await chrome.downloads.download(options)
+    return { success: true, id }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Actions
@@ -1474,5 +1582,5 @@ async function openAgentForTab(tabId) {
 
 // Exposed for the unit tests, which load this file into a vm context with a stubbed `chrome`.
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { isBlockedSite, isHttpUrl, matchesPattern, dialogAnswer, mapKey, ERR }
+    module.exports = { isBlockedSite, isFinancialSite, hostMatches, isHttpUrl, matchesPattern, dialogAnswer, mapKey, ERR }
 }

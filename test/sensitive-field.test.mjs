@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { loadScripts, read } from './helpers/load.mjs'
 
 const { exports } = loadScripts(['js/content-scripts/accessibility-tree.js'])
-const { isSensitiveField, fieldLabel } = exports['js/content-scripts/accessibility-tree.js']
+const { isSensitiveField, fieldLabel, detectChallenges } = exports['js/content-scripts/accessibility-tree.js']
 
 /** The bits of an <input> the test looks at. */
 const input = ({ type = 'text', autocomplete = null, name = '', id = '', placeholder = '', aria = null, label = null } = {}) => ({
@@ -75,4 +75,36 @@ test('a sensitive field is typed into only with confirmation', () => {
     assert.match(worker, /SENSITIVE_FIELD: 'SENSITIVE_FIELD'/)
     const contentScript = read('js/content-scripts/accessibility-tree.js')
     assert.match(contentScript, /isSensitiveField\(el\) && message\.confirmed !== true/)
+})
+
+/** A document whose querySelectorAll answers by selector substring; every element is visible. */
+function doc({ passwords = 0, fields = 0, captchaEls = 0, title = '', text = '' } = {}) {
+    const el = () => ({ offsetWidth: 10, offsetHeight: 10 })
+    return {
+        title,
+        body: { innerText: text },
+        querySelectorAll(selector) {
+            if (selector.includes('type="password"')) return Array.from({ length: passwords }, el)
+            if (selector.startsWith('input:not')) return Array.from({ length: fields }, el)
+            if (selector.includes('recaptcha')) return Array.from({ length: captchaEls }, el)
+            return []
+        },
+    }
+}
+
+test('detectChallenges: a small form with a password field is a sign-in page', () => {
+    assert.deepEqual({ ...detectChallenges(doc({ passwords: 1, fields: 2 })) }, { loginDetected: true, captchaDetected: false })
+    assert.deepEqual({ ...detectChallenges(doc({ passwords: 1, fields: 3 })) }, { loginDetected: true, captchaDetected: false })
+})
+
+test('detectChallenges: a registration form with many fields is not', () => {
+    assert.equal(detectChallenges(doc({ passwords: 1, fields: 6 })).loginDetected, false)
+    assert.equal(detectChallenges(doc({ passwords: 0, fields: 2 })).loginDetected, false)
+})
+
+test('detectChallenges: a CAPTCHA widget, title or text', () => {
+    assert.equal(detectChallenges(doc({ captchaEls: 1 })).captchaDetected, true)
+    assert.equal(detectChallenges(doc({ title: 'Just a moment...' })).captchaDetected, true)
+    assert.equal(detectChallenges(doc({ text: 'Please verify you are human to continue' })).captchaDetected, true)
+    assert.equal(detectChallenges(doc({ title: 'Example Domain', text: 'This domain is for use in examples.' })).captchaDetected, false)
 })

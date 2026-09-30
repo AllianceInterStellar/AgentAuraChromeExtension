@@ -12,6 +12,9 @@
  *     task.
  *   - A run may carry a mode override: a scheduled task that fires while nobody asked for
  *     autonomy runs under `ask` even when the stored mode is `act`.
+ *   - A site the user marked "always allow" runs without asking in `ask` and `plan` mode,
+ *     except for what always asks. The list is kept in storage and reviewed in Settings.
+ *   - On a payment or finance page every action that changes something asks, in every mode.
  */
 class PermissionManager {
     constructor() {
@@ -29,16 +32,59 @@ class PermissionManager {
         this.approveAllForRun = false
         /** A mode the current run has to use instead of the stored one, or null. */
         this.runModeOverride = null
+        /** Registrable domains the user allowed once and for all. */
+        this.siteAllow = new Set()
+        /** The `{ url, financial }` the pending approval was asked with. */
+        this.pendingContext = null
+        try {
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'local' && changes[PermissionManager.SITE_ALLOW_KEY]) {
+                    this.siteAllow = new Set(changes[PermissionManager.SITE_ALLOW_KEY].newValue || [])
+                }
+            })
+        } catch (_) { }
     }
 
     static MODES = ['ask', 'act', 'plan']
+    static SITE_ALLOW_KEY = 'agent_site_allow'
 
-    /** Actions that ask in every mode, "approve all" included. */
-    static ALWAYS_CONFIRM = new Set(['execute_js'])
+    /** Actions that ask in every mode, "approve all" included. `download` is the worker's, not the model's. */
+    static ALWAYS_CONFIRM = new Set(['execute_js', 'download'])
+
+    /** Actions that change something on the page; the ones that ask on a payment or finance page. */
+    static MUTATING = new Set(['click', 'click_ref', 'type', 'type_ref', 'form_input', 'cdp_click', 'cdp_type', 'cdp_key', 'cdp_drag', 'execute_js'])
 
     async init() {
-        const stored = await chrome.storage.local.get('agent_permission_mode')
+        const stored = await chrome.storage.local.get(['agent_permission_mode', PermissionManager.SITE_ALLOW_KEY])
         this.mode = PermissionManager.MODES.includes(stored.agent_permission_mode) ? stored.agent_permission_mode : 'ask'
+        this.siteAllow = new Set(Array.isArray(stored[PermissionManager.SITE_ALLOW_KEY]) ? stored[PermissionManager.SITE_ALLOW_KEY] : [])
+    }
+
+    /** The site of a URL, as the allow list keys it. registrableDomain comes from utils.js. */
+    static siteOf(url) {
+        if (typeof registrableDomain === 'function') return registrableDomain(url)
+        try { return new URL(url).hostname.toLowerCase() } catch (_) { return '' }
+    }
+
+    isSiteAllowed(url) {
+        const site = PermissionManager.siteOf(url)
+        return !!site && this.siteAllow.has(site)
+    }
+
+    async allowSite(site) {
+        const key = String(site || '').trim().toLowerCase()
+        if (!key) return
+        this.siteAllow.add(key)
+        await chrome.storage.local.set({ [PermissionManager.SITE_ALLOW_KEY]: [...this.siteAllow].sort() })
+    }
+
+    async removeSite(site) {
+        this.siteAllow.delete(String(site || '').trim().toLowerCase())
+        await chrome.storage.local.set({ [PermissionManager.SITE_ALLOW_KEY]: [...this.siteAllow].sort() })
+    }
+
+    getAllowedSites() {
+        return [...this.siteAllow].sort()
     }
 
     async setMode(mode) {
@@ -65,22 +111,30 @@ class PermissionManager {
         this.runModeOverride = null
     }
 
-    /** Whether `action` asks regardless of mode. */
-    static alwaysConfirms(action) {
+    /**
+     * Whether `action` asks regardless of mode: running JavaScript, a download, typing into
+     * a sensitive field, or changing anything on a payment or finance page.
+     */
+    static alwaysConfirms(action, context = {}) {
         if (!action) return false
-        return PermissionManager.ALWAYS_CONFIRM.has(action.type) || action.sensitive === true
+        if (PermissionManager.ALWAYS_CONFIRM.has(action.type) || action.sensitive === true) return true
+        return context.financial === true && PermissionManager.MUTATING.has(action.type)
     }
 
     /**
-     * In `plan` mode only the steps of the plan the user approved may run. Anything the model
-     * adds afterwards goes through the ordinary per-action approval.
+     * `context` is `{ url, financial }` for the page the action targets. In `plan` mode only
+     * the steps of the plan the user approved may run; anything the model adds afterwards goes
+     * through the ordinary per-action approval.
      */
-    async checkPermission(action) {
-        if (PermissionManager.alwaysConfirms(action)) {
-            return await this.requestApproval(action)
+    async checkPermission(action, context = {}) {
+        if (PermissionManager.alwaysConfirms(action, context)) {
+            return await this.requestApproval(action, context)
         }
         if (this.approveAllForRun) {
             return { approved: true, approveAll: true }
+        }
+        if (context.url && this.isSiteAllowed(context.url)) {
+            return { approved: true, site: true }
         }
         const mode = this.effectiveMode()
         if (mode === 'act') {
@@ -90,27 +144,49 @@ class PermissionManager {
             if (this._approvedPlan && this._approvedPlan.includes(action)) {
                 return { approved: true, approveAll: false }
             }
-            return await this.requestApproval(action)
+            return await this.requestApproval(action, context)
         }
-        return await this.requestApproval(action)
+        return await this.requestApproval(action, context)
+    }
+
+    /** Whether the open approval can be answered with "always allow on this site". */
+    canAllowPendingSite() {
+        if (!this.pendingApproval || !this.pendingContext || !this.pendingContext.url) return false
+        if (PermissionManager.alwaysConfirms(this.pendingApproval, this.pendingContext)) return false
+        return !!PermissionManager.siteOf(this.pendingContext.url)
+    }
+
+    /** The site the open approval is about, for the button label. */
+    pendingSite() {
+        return this.pendingContext && this.pendingContext.url ? PermissionManager.siteOf(this.pendingContext.url) : ''
+    }
+
+    /** "Always allow on this site": the pending action runs, and so does every later one there. */
+    async approveSite() {
+        if (!this.canAllowPendingSite()) return null
+        const site = this.pendingSite()
+        await this.allowSite(site)
+        this._settle({ approved: true, site: true })
+        return site
     }
 
     /**
      * The worker refused to type into a field that looks like a password or a card number.
      * The user decides; the answer is good for this one action only.
      */
-    async requestSensitiveApproval(action, result) {
+    async requestSensitiveApproval(action, result, context = {}) {
         return await this.requestApproval({
             ...action,
             sensitive: true,
             fieldLabel: (result && result.field) || ''
-        })
+        }, context)
     }
 
     _settle(result) {
         const resolve = this.approvalResolver
         this.approvalResolver = null
         this.pendingApproval = null
+        this.pendingContext = null
         if (resolve) resolve(result)
         if (this.onResolved) this.onResolved(result)
     }
@@ -131,10 +207,13 @@ class PermissionManager {
         })
     }
 
-    async requestApproval(action) {
+    async requestApproval(action, context = {}) {
         return this._open(
             action,
-            () => { if (this.onApprovalNeeded) this.onApprovalNeeded(action) },
+            () => {
+                this.pendingContext = context || {}
+                if (this.onApprovalNeeded) this.onApprovalNeeded(action, this.pendingContext)
+            },
             this._approvalTimeout,
             { approved: false, approveAll: false, timedOut: true }
         )

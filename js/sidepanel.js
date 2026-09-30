@@ -87,6 +87,12 @@ const sidepanel = (() => {
     /** Failed turns in a row. After MAX_CONSECUTIVE_FAILURES the run stops and asks the user. */
     let consecutiveFailures = 0
     const MAX_CONSECUTIVE_FAILURES = 3
+    /**
+     * Pages the run already paused on for a sign-in or a CAPTCHA. The user finishes the page
+     * and sends a message to go on; the same page must not pause the run a second time.
+     * Cleared by New Chat.
+     */
+    let pausedUrls = new Set()
 
     // Codes the worker attaches to a failed action. Only these are worth a retry; the message
     // text is translated and never inspected.
@@ -150,6 +156,10 @@ const sidepanel = (() => {
                 if (isRecording && sender.tab && sender.tab.id === workflowRecorder.tabId) {
                     workflowRecorder.recordAction(msg.action)
                 }
+            }
+            // The worker cancelled a download that started while the agent runs; the user decides.
+            if (msg.type === 'AGENT_DOWNLOAD_BLOCKED' && !sender.tab) {
+                handleBlockedDownload(msg)
             }
         })
 
@@ -245,6 +255,10 @@ const sidepanel = (() => {
 
         $('#sp-btn-deny').addEventListener('click', () => permissionManager.deny())
         $('#sp-btn-approve').addEventListener('click', () => permissionManager.approve())
+        $('#sp-btn-approve-site').addEventListener('click', async () => {
+            const site = await permissionManager.approveSite()
+            if (site) addSystemMessage(I18n.t('sys.siteAllowed', { site }))
+        })
         // The rest of this run, not a change of the stored mode: that used to flip the panel
         // (and every later scheduled task) into `act` for good.
         $('#sp-btn-approve-all').addEventListener('click', () => permissionManager.approveAll())
@@ -487,9 +501,10 @@ const sidepanel = (() => {
                 if (!runIsCurrent(runId)) return
             }
 
-            const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+            // A new run starts from the tab the user is looking at; from here on runTab() pins it.
+            automationEngine.activeTabId = null
+            const activeTab = await runTab()
             if (activeTab && activeTab.id) {
-                automationEngine.activeTabId = activeTab.id
                 await tabManager.ensureGroup(activeTab.id, 'AgentAura')
                 updateTabCount()
                 await chrome.runtime.sendMessage({
@@ -511,6 +526,7 @@ const sidepanel = (() => {
             pendingScreenshot = null
             const tabContext = await gatherTabContext()
             if (!runIsCurrent(runId)) return
+            if (pauseIfNeeded(runId, contextInfo)) return
             const fullMessage = buildAgentMessage(userMessage, contextInfo, tabContext)
             const attachments = buildMessageAttachments(contextInfo)
             trimConversationHistory()
@@ -599,6 +615,7 @@ const sidepanel = (() => {
                     await new Promise(r => setTimeout(r, 400))
                     const recoveryContext = await gatherPageContext(true, execution.screenshot)
                     const recoveryTabs = await gatherTabContext()
+                    if (!runIsCurrent(runId) || pauseIfNeeded(runId, recoveryContext)) return
                     const recoveryMsg = buildRecoveryMessage(execution.failedAction, execution.failedResult, recoveryContext, recoveryTabs, execution.executed)
                     await continueAgentLoop(runId, recoveryMsg, buildMessageAttachments(recoveryContext))
                 } else {
@@ -606,6 +623,7 @@ const sidepanel = (() => {
                     await new Promise(r => setTimeout(r, 500))
                     const verifyContext = await gatherPageContext(true, execution.screenshot)
                     const verifyTabs = await gatherTabContext()
+                    if (!runIsCurrent(runId) || pauseIfNeeded(runId, verifyContext)) return
                     const verifyMsg = buildVerifyMessage(execution.executed, verifyContext, verifyTabs)
                     await continueAgentLoop(runId, verifyMsg, buildMessageAttachments(verifyContext))
                 }
@@ -628,6 +646,37 @@ const sidepanel = (() => {
         hideAgentBanner()
         settleIndicator(groupStatus)
         stopMonitoring()
+    }
+
+    /**
+     * A sign-in page or a CAPTCHA is the user's to handle, not the agent's. The run ends
+     * here with a message saying what to do; the next message the user sends resumes it, and
+     * that page does not pause the run again. Returns true when the run was paused.
+     */
+    function pauseIfNeeded(runId, context) {
+        if (!context || !context.pause || !context.url) return false
+        if (pausedUrls.has(context.url)) return false
+        pausedUrls.add(context.url)
+        addSystemMessage(I18n.t(context.pause === 'captcha' ? 'sys.pausedCaptcha' : 'sys.pausedLogin', { url: context.url }))
+        finishAgentLoop(runId, 'approval')
+        return true
+    }
+
+    /** A download the worker cancelled because the agent was running. Always asks, whatever the mode. */
+    async function handleBlockedDownload(info) {
+        const action = { type: 'download', url: info.url || '', filename: info.filename || '', mime: info.mime || '', bytes: info.bytes || 0 }
+        const name = action.filename || action.url
+        const decision = await permissionManager.requestApproval(action, { url: action.url })
+        if (decision && decision.approved) {
+            try {
+                const res = await chrome.runtime.sendMessage({ type: 'AGENT_DOWNLOAD_ALLOW', url: action.url, filename: action.filename })
+                addSystemMessage(res && res.success ? I18n.t('sys.downloadAllowed', { name }) : I18n.t('sys.downloadFailed', { name, error: (res && res.error) || '' }))
+            } catch (e) {
+                addSystemMessage(I18n.t('sys.downloadFailed', { name, error: e.message }))
+            }
+        } else {
+            addSystemMessage(I18n.t('sys.downloadBlocked', { name }))
+        }
     }
 
     /**
@@ -704,11 +753,12 @@ const sidepanel = (() => {
                 return { url: tab.url || 'chrome://newtab', title: tab.title || '', noPage: true }
             }
 
-            const blocked = await chrome.runtime.sendMessage({
+            const siteCheck = await chrome.runtime.sendMessage({
                 type: 'CHECK_BLOCKED_SITE',
                 url: tab.url
             })
-            if (blocked && blocked.blocked) return { blocked: true, url: tab.url }
+            if (siteCheck && siteCheck.blocked) return { blocked: true, url: tab.url }
+            const financial = !!(siteCheck && siteCheck.financial)
 
             let structure = null
             let pageContent = null
@@ -747,12 +797,19 @@ const sidepanel = (() => {
                 }
             }
 
+            // What the content script noticed about the page: a sign-in form or a human check.
+            const pause = pageContent && pageContent.captchaDetected ? 'captcha'
+                : pageContent && pageContent.loginDetected ? 'login'
+                    : null
+
             return {
                 url: tab.url,
                 title: tab.title,
                 structure,
                 pageContent,
-                screenshot
+                screenshot,
+                financial,
+                pause
             }
         } catch (_) {
             return { url: 'unknown', title: '', noPage: true }
@@ -1080,7 +1137,19 @@ const sidepanel = (() => {
     async function executeAgentAction(runId, action) {
         showAgentBanner(I18n.t('sys.executing', { action: automationEngine.describeAction(action) }))
 
-        const allowed = await permissionManager.checkPermission(action)
+        // Where the action lands decides how it is approved: a site the user allowed once and
+        // for all runs without asking, a payment or finance page asks for anything that
+        // changes something.
+        const target = await runTab()
+        const approvalContext = { url: target && target.url ? target.url : '' }
+        if (approvalContext.url) {
+            try {
+                const siteCheck = await chrome.runtime.sendMessage({ type: 'CHECK_BLOCKED_SITE', url: approvalContext.url })
+                approvalContext.financial = !!(siteCheck && siteCheck.financial)
+            } catch (_) { }
+        }
+
+        const allowed = await permissionManager.checkPermission(action, approvalContext)
         if (!runIsCurrent(runId)) return { success: false, error: I18n.t('sys.stopped') }
         if (!allowed || !allowed.approved) {
             if (allowed && allowed.timedOut) {
@@ -1094,7 +1163,7 @@ const sidepanel = (() => {
 
         notifyAgentGroupState('running')
 
-        const tab = await runTab()
+        const tab = target
 
         // `current` gains `confirmedSensitive` once the user has confirmed typing into a
         // password or card field; the worker refuses such a field until it does.
@@ -1115,7 +1184,7 @@ const sidepanel = (() => {
 
                 if (result && result.code === 'SENSITIVE_FIELD' && !current.confirmedSensitive) {
                     notifyAgentGroupState('approval')
-                    const confirmed = await permissionManager.requestSensitiveApproval(current, result)
+                    const confirmed = await permissionManager.requestSensitiveApproval(current, result, approvalContext)
                     if (!runIsCurrent(runId)) return { success: false, error: I18n.t('sys.stopped') }
                     if (!confirmed || !confirmed.approved) {
                         addSystemMessage(I18n.t('sys.sensitiveDenied', { action: automationEngine.describeAction(action) }))
@@ -1632,6 +1701,7 @@ const sidepanel = (() => {
         conversationHistory = []
         isGenerating = false
         pendingScreenshot = null
+        pausedUrls = new Set()
         hideApprovalOverlays()
 
         if (chatService) {
@@ -1936,7 +2006,7 @@ const sidepanel = (() => {
      * the element a [ref] points at, the whole text about to be typed, and a warning when
      * the target is a password or card field.
      */
-    function showActionApproval(action) {
+    function showActionApproval(action, context = {}) {
         notifyAgentGroupState('approval')
         const overlay = $('#sp-approval-overlay')
         $('#sp-approval-type').textContent = action.type
@@ -1945,7 +2015,23 @@ const sidepanel = (() => {
         if (action.ref !== undefined && lastRefLabels.has(Number(action.ref))) {
             description += ` — ${I18n.t('approval.element', { label: lastRefLabels.get(Number(action.ref)) })}`
         }
+        if (action.type === 'download') {
+            const size = action.bytes > 0 ? ` (${Math.max(1, Math.round(action.bytes / 1024))} KB${action.mime ? ', ' + action.mime : ''})` : (action.mime ? ` (${action.mime})` : '')
+            description = I18n.t('approval.download', { name: action.filename || action.url, url: action.url }) + size
+        }
+        if (context.financial && action.type !== 'download') {
+            description += ` — ${I18n.t('approval.financial')}`
+        }
         $('#sp-approval-desc').textContent = description
+
+        // "Always allow on this site": not for what always asks, and only when there is a site.
+        const siteRow = $('#sp-approval-site')
+        const siteBtn = $('#sp-btn-approve-site')
+        if (siteRow && siteBtn) {
+            const canAllow = permissionManager.canAllowPendingSite()
+            siteRow.classList.toggle('hidden', !canAllow)
+            if (canAllow) siteBtn.textContent = I18n.t('approval.allowSite', { site: permissionManager.pendingSite() })
+        }
 
         const code = $('#sp-approval-code')
         if (code) {

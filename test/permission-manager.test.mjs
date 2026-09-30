@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadScripts, plain } from './helpers/load.mjs'
 
-const { run, context } = loadScripts(['js/agent/permission-manager.js'])
+const { run, context } = loadScripts(['js/utils.js', 'js/agent/permission-manager.js'])
 const PermissionManager = run('PermissionManager')
 
 /** A manager whose approval prompts are answered by `answer(action)` instead of a human. */
@@ -158,4 +158,89 @@ test('a second prompt supersedes the first instead of leaving it hanging', async
     pm.approve()
     assert.equal((await first).superseded, true)
     assert.equal((await second).approved, true)
+})
+
+test('a site the user allowed runs without asking in ask mode, except for what always asks', async () => {
+    let asked = 0
+    const pm = manager('ask', () => { asked++; return 'deny' })
+    await pm.allowSite('example.com')
+    assert.deepEqual(plain(await context.chrome.storage.local.get('agent_site_allow')), { agent_site_allow: ['example.com'] })
+
+    const onSite = await pm.checkPermission({ type: 'click_ref', ref: 1 }, { url: 'https://app.example.com/page' })
+    assert.equal(onSite.approved, true)
+    assert.equal(onSite.site, true)
+    assert.equal(asked, 0)
+
+    const elsewhere = await pm.checkPermission({ type: 'click_ref', ref: 1 }, { url: 'https://other.com/' })
+    assert.equal(elsewhere.approved, false)
+    assert.equal(asked, 1)
+
+    const js = await pm.checkPermission({ type: 'execute_js', code: '1' }, { url: 'https://example.com/' })
+    assert.equal(js.approved, false, 'execute_js still asks on an allowed site')
+    assert.equal(asked, 2)
+
+    await pm.removeSite('example.com')
+    assert.equal(pm.isSiteAllowed('https://example.com/'), false)
+    assert.deepEqual(plain(await context.chrome.storage.local.get('agent_site_allow')), { agent_site_allow: [] })
+})
+
+test('"always allow on this site" answers the open prompt and remembers the site', async () => {
+    const pm = manager('ask', () => null)
+    const pending = pm.checkPermission({ type: 'click', selector: '#a' }, { url: 'https://news.site.org/x' })
+    assert.equal(pm.canAllowPendingSite(), true)
+    assert.equal(pm.pendingSite(), 'site.org')
+    const site = await pm.approveSite()
+    assert.equal(site, 'site.org')
+    assert.equal((await pending).approved, true)
+    assert.equal(pm.isSiteAllowed('https://site.org/'), true)
+    assert.equal(pm.canAllowPendingSite(), false, 'nothing pending any more')
+})
+
+test('the site button is not offered for what always asks, or without a site', async () => {
+    const pm = manager('ask', () => null)
+    pm.checkPermission({ type: 'execute_js', code: '1' }, { url: 'https://x.com/' })
+    assert.equal(pm.canAllowPendingSite(), false)
+    pm.cancelPending()
+    pm.checkPermission({ type: 'click', selector: '#a' }, {})
+    assert.equal(pm.canAllowPendingSite(), false)
+    pm.cancelPending()
+    pm.checkPermission({ type: 'download', url: 'https://x.com/f.zip' }, { url: 'https://x.com/f.zip' })
+    assert.equal(pm.canAllowPendingSite(), false, 'a download always asks')
+    pm.cancelPending()
+})
+
+test('on a payment or finance page every change asks, in act mode too; reading does not', async () => {
+    let asked = 0
+    const pm = manager('act', () => { asked++; return 'approve' })
+    await pm.allowSite('shop.com')
+    const buy = await pm.checkPermission({ type: 'click_ref', ref: 3 }, { url: 'https://shop.com/checkout', financial: true })
+    assert.equal(buy.approved, true)
+    assert.equal(asked, 1, 'a click on a checkout page asked even in act mode on an allowed site')
+    const read = await pm.checkPermission({ type: 'read_page_content' }, { url: 'https://shop.com/checkout', financial: true })
+    assert.equal(read.approved, true)
+    assert.equal(asked, 1, 'reading the page did not ask')
+    const scroll = await pm.checkPermission({ type: 'scroll', direction: 'down' }, { url: 'https://shop.com/checkout', financial: true })
+    assert.equal(scroll.approved, true)
+    assert.equal(asked, 1)
+    await pm.removeSite('shop.com')
+})
+
+test('a download asks in every mode and "approve all" does not cover it', async () => {
+    for (const mode of ['ask', 'act', 'plan']) {
+        let asked = 0
+        const pm = manager(mode, () => { asked++; return 'approve' })
+        pm.approveAllForRun = true
+        const result = await pm.checkPermission({ type: 'download', url: 'https://x.com/report.pdf', filename: 'report.pdf' }, { url: 'https://x.com/report.pdf' })
+        assert.equal(result.approved, true, mode)
+        assert.equal(asked, 1, mode)
+    }
+})
+
+test('the approval hook receives the context the action was asked with', async () => {
+    let seen = null
+    const pm = manager('ask', () => 'approve')
+    pm.onApprovalNeeded = (action, ctx) => { seen = { action: { ...action }, ctx: { ...ctx } }; pm.approve() }
+    await pm.checkPermission({ type: 'click', selector: '#a' }, { url: 'https://a.com/', financial: false })
+    assert.deepEqual(seen.ctx, { url: 'https://a.com/', financial: false })
+    assert.equal(seen.action.type, 'click')
 })

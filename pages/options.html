@@ -200,6 +200,25 @@
             margin-top: 12px;
         }
 
+        .setting-row-stacked {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
+        }
+
+        .hosts-input {
+            width: 100%;
+            box-sizing: border-box;
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            resize: vertical;
+        }
+
         .shortcut-item {
             display: flex;
             justify-content: space-between;
@@ -361,6 +380,30 @@
         </div>
         <div class="setting-row">
             <div class="setting-info">
+                <div class="setting-label" data-i18n="options.financialConfirm">Confirm on Payment and Finance Pages</div>
+                <div class="setting-desc" data-i18n="options.financialConfirmDesc">Every action that changes something on a checkout, billing, bank or exchange page asks first, in every mode</div>
+            </div>
+            <label class="toggle">
+                <input type="checkbox" id="setting-financial-confirm" checked>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+        <div class="setting-row setting-row-stacked">
+            <div class="setting-info">
+                <div class="setting-label" data-i18n="options.extraBlocked">Also Block These Sites</div>
+                <div class="setting-desc" data-i18n="options.hostsDesc">One hostname per line; subdomains are included</div>
+            </div>
+            <textarea id="setting-extra-blocked" class="hosts-input" rows="3" placeholder="example.com"></textarea>
+        </div>
+        <div class="setting-row setting-row-stacked">
+            <div class="setting-info">
+                <div class="setting-label" data-i18n="options.allowedHosts">Never Block These Sites</div>
+                <div class="setting-desc" data-i18n="options.allowedHostsDesc">Exceptions to the blocklist above. Browser-internal pages stay off limits</div>
+            </div>
+            <textarea id="setting-allowed-hosts" class="hosts-input" rows="3" placeholder="intranet.example.com"></textarea>
+        </div>
+        <div class="setting-row">
+            <div class="setting-info">
                 <div class="setting-label" data-i18n="options.screenshotEveryTurn">Screenshot Every Turn</div>
                 <div class="setting-desc" data-i18n="options.screenshotEveryTurnDesc">Send a screenshot with every model turn, not only when the element list is not enough or the agent asks for one</div>
             </div>
@@ -398,6 +441,14 @@
             </div>
             <input type="text" id="setting-api-url" placeholder="http://localhost:2222"
                 style="width: 220px; background: var(--bg2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 13px;">
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title" data-i18n="options.siteAllow">Sites Allowed Without Asking</div>
+        <p class="setting-desc" data-i18n="options.siteAllowDesc">Chosen with "Always allow on this site" on an approval card. Running JavaScript, typing into password or card fields, downloads and payment pages still ask.</p>
+        <div class="shortcuts-list" id="site-allow-list">
+            <div style="color: var(--text3); font-size: 12px; text-align: center; padding: 20px;" data-i18n="ui.loading">Loading...</div>
         </div>
     </div>
 

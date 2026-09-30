@@ -75,6 +75,7 @@ class AutomationEngine {
             // The approval card asks for more of the text than a banner has room for.
             text: clip(action.text, limits.text ?? 30),
             url: clip(action.url, 120),
+            filename: clip(action.filename, 80),
             direction: action.direction || 'down',
             duration: action.duration || 1000,
             tabId: action.targetTabId,
@@ -116,6 +117,7 @@ class AutomationEngine {
             case 'cdp_drag': return `CDP drag (${p.startX},${p.startY}) → (${p.endX},${p.endY})`
             case 'read_console': return 'Read console messages'
             case 'read_network': return 'Read network requests'
+            case 'download': return `Download ${p.filename || p.url}`
             default: return String(action.type)
         }
     }

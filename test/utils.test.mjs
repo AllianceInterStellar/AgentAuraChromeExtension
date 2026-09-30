@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { loadScripts } from './helpers/load.mjs'
 
 const { exports } = loadScripts(['js/utils.js'])
-const { escapeHtml, escapeAttr, sanitizeUrl, toNumber, clamp, cssToken } = exports['js/utils.js']
+const { escapeHtml, escapeAttr, sanitizeUrl, toNumber, clamp, cssToken, registrableDomain } = exports['js/utils.js']
 
 test('escapeHtml escapes all five characters, and only those', () => {
     assert.equal(escapeHtml('&'), '&amp;')
@@ -133,4 +133,23 @@ test('cssToken keeps [a-z0-9_-] and nothing else', () => {
     assert.equal(cssToken(null), '')
     assert.equal(cssToken(undefined, 'safe'), 'safe')
     assert.equal(cssToken(42), '42')
+})
+
+test('registrableDomain: the site a URL belongs to, as the allow list keys it', () => {
+    assert.equal(registrableDomain('https://docs.example.com/a?b=c'), 'example.com')
+    assert.equal(registrableDomain('https://example.com/'), 'example.com')
+    assert.equal(registrableDomain('EXAMPLE.COM'), 'example.com')
+    assert.equal(registrableDomain('a.b.c.example.org'), 'example.org')
+    assert.equal(registrableDomain('https://shop.example.co.uk/'), 'example.co.uk')
+    assert.equal(registrableDomain('www.example.com.cn'), 'example.com.cn')
+    assert.equal(registrableDomain('http://localhost:3000/x'), 'localhost')
+    assert.equal(registrableDomain('http://127.0.0.1:8080/'), '127.0.0.1')
+    assert.equal(registrableDomain('http://[::1]/'), '::1')
+    assert.equal(registrableDomain('example.com.'), 'example.com')
+    assert.equal(registrableDomain(''), '')
+    assert.equal(registrableDomain(null), '')
+    assert.equal(registrableDomain('about:blank'), '')
+    assert.equal(registrableDomain('javascript:alert(1)'), '')
+    assert.equal(registrableDomain('localhost:3000'), 'localhost')
+    assert.equal(registrableDomain('api.example.com:8443'), 'example.com')
 })
