@@ -22,13 +22,21 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      # A manual run from a branch would package whatever is on it and publish a release with
-      # no tag to point at. Refuse it up front, with the fix in the message.
-      - name: Must run on a tag
-        if: github.ref_type != 'tag'
+      # Two ways in. A pushed v* tag releases that tag. A manual run from the default branch
+      # releases the branch head: the workflow creates the tag itself, at the version the
+      # manifest carries, so a release never needs a tag pushed by hand. A manual run from any
+      # other branch is refused: a release has to point at something that is on main.
+      - name: Decide what is being released
+        id: ref
         run: |
-          echo "::error::Release only runs from a v* tag, and this run is on ${GITHUB_REF_TYPE} '${GITHUB_REF_NAME}'. Push a tag (git tag v1.2.3 && git push origin v1.2.3), or in Actions → Release → Run workflow choose the tag under 'Use workflow from'."
-          exit 1
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "mode=tag" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF_NAME}" = "${{ github.event.repository.default_branch }}" ]; then
+            echo "mode=branch" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Release runs from a v* tag or from ${{ github.event.repository.default_branch }}, not from ${GITHUB_REF_TYPE} '${GITHUB_REF_NAME}'. Merge first, then run it from the default branch."
+            exit 1
+          fi
 
       # TODO: pin every `uses:` to a commit SHA (`actions/checkout@<sha> # v4`) once the SHAs
       # can be verified against the upstream repositories; a tag can be moved, a SHA cannot.
@@ -44,11 +52,38 @@ jobs:
         run: |
           version=$(node -p "require('./manifest.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
           echo "Manifest version: $version"
-          tag_version="${GITHUB_REF_NAME#v}"
-          if [ "$tag_version" != "$version" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match manifest version $version"
+          if [ "${{ steps.ref.outputs.mode }}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [ "$tag_version" != "$version" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match manifest version $version"
+              exit 1
+            fi
+          fi
+
+      # Manual run from the default branch: tag this commit. A version that was already
+      # released from a different commit is refused, so the same number can never name two
+      # packages. Pushing with GITHUB_TOKEN does not start another run of this workflow.
+      - name: Create the tag
+        if: steps.ref.outputs.mode == 'branch'
+        run: |
+          tag='${{ steps.version.outputs.tag }}'
+          peeled=$(git ls-remote --tags origin "refs/tags/${tag}^{}" | cut -f1)
+          plain=$(git ls-remote --tags origin "refs/tags/${tag}" | cut -f1)
+          target="${peeled:-$plain}"
+          if [ -n "$target" ] && [ "$target" != "$GITHUB_SHA" ]; then
+            echo "::error::$tag already exists and points at $target, not at $GITHUB_SHA. Bump the version in manifest.json before releasing again."
             exit 1
+          fi
+          if [ -z "$target" ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag -a "$tag" -m "AgentAura Chrome Extension ${{ steps.version.outputs.version }}"
+            git push origin "refs/tags/$tag"
+            echo "Created $tag at $GITHUB_SHA"
+          else
+            echo "$tag already points at this commit"
           fi
 
       # Only what the browser actually loads. The test scripts and CI config have no business
@@ -133,6 +168,7 @@ jobs:
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
           files: ${{ steps.package.outputs.name }}
           generate_release_notes: true
           body: |
